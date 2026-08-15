@@ -89,12 +89,16 @@ class VVVFModulator:
                 )
                 switching = np.where(references >= carrier[np.newaxis, :], 1.0, -1.0)
 
-        line_voltage_uv = normalized_amplitude * 0.5 * (
-            switching[0] - switching[1]
-        )
+        # The modulation index already controls switching duty through the PWM
+        # references. Bridge voltage levels remain normalized DC-bus states;
+        # multiplying them by amplitude again would double-scale low-speed audio.
+        line_voltage_uv = 0.5 * (switching[0] - switching[1])
         common_mode = np.mean(switching, axis=0)
-        excitation = normalized_amplitude * (
-            0.72 * line_voltage_uv + 0.28 * np.diff(common_mode, prepend=common_mode[0])
+        excitation = (
+            0.72 * line_voltage_uv
+            + 0.28
+            * normalized_amplitude
+            * np.diff(common_mode, prepend=common_mode[0])
         )
         if advance_phase:
             elapsed = num_samples / self.sample_rate

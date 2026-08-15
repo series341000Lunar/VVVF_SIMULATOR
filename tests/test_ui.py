@@ -105,6 +105,19 @@ class MainWindowTests(unittest.TestCase):
         self.assertGreater(len(self.window.reference_curve.getData()[0]), 100)
         self.assertGreater(len(self.window.spectrum_curve.getData()[0]), 100)
 
+    def test_loudness_compensation_defaults_on_and_can_toggle(self) -> None:
+        self.assertTrue(self.window.loudness_checkbox.isChecked())
+        self.assertTrue(self.window.audio_output.loudness_compensation_enabled)
+        self.assertRegex(self.window.monitor_gain_value.text(), r"^[+-]\d+\.\d dB$")
+        self.window.loudness_checkbox.setChecked(False)
+        self.application.processEvents()
+        self.assertEqual(self.window.loudness_checkbox.text(), "OFF")
+        self.assertFalse(self.window.audio_output.loudness_compensation_enabled)
+        self.window.loudness_checkbox.setChecked(True)
+        self.application.processEvents()
+        self.assertEqual(self.window.loudness_checkbox.text(), "ON")
+        self.assertTrue(self.window.audio_output.loudness_compensation_enabled)
+
     def test_profile_reload_keeps_schema_v2_running(self) -> None:
         self.window.reload_button.click()
         self.application.processEvents()

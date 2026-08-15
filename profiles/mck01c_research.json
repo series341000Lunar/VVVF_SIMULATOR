@@ -91,6 +91,20 @@
   },
   "motor_acoustics": {
     "data_notice": "SIMULATOR TUNING — NOT VERIFIED MCK01C VEHICLE DATA",
+    "monitor_loudness": {
+      "enabled_default": true,
+      "target_rms_dbfs": -20.0,
+      "minimum_compensation_db": -6.0,
+      "maximum_compensation_db": 18.0,
+      "minimum_profile_amplitude": 0.005,
+      "calibration_step_hz": 1.0,
+      "calibration_warmup_seconds": 0.15,
+      "calibration_measure_seconds": 0.35,
+      "curve_smoothing_hz": 2.0,
+      "attack_ms": 150.0,
+      "release_ms": 500.0,
+      "data_notice": "SIMULATOR MONITOR TUNING — DOES NOT MODIFY VVVF PROFILE AMPLITUDE"
+    },
     "resonances": [
       {"frequency_hz": 650.0, "gain": 1.5, "q": 4.0},
       {"frequency_hz": 1200.0, "gain": 2.0, "q": 6.0},

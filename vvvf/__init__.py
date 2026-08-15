@@ -2,6 +2,7 @@
 
 from .dynamics import DriveDynamics, DriveDynamicsConfig
 from .frequency import LinearFrequencyMapper
+from .loudness import LoudnessCompensationConfig, MonitorLoudnessCompensator
 from .audio import AudioOutput, AudioSynthesizer
 from .model import DriveState, InputMode, InterpolationType, ModulationMode
 from .modulation import VVVFModulator, WaveformBlock
@@ -19,7 +20,9 @@ __all__ = [
     "InterpolationType",
     "LinearFrequencyMapper",
     "LinearMotorFrequencyModel",
+    "LoudnessCompensationConfig",
     "ModulationMode",
+    "MonitorLoudnessCompensator",
     "SimulationSnapshot",
     "SimulationState",
     "VVVFProfile",

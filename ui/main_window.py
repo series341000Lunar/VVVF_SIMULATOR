@@ -9,6 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QElapsedTimer, QSignalBlocker, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -208,6 +209,17 @@ class MainWindow(QMainWindow):
         volume_row.addWidget(self.volume_slider, 1)
         volume_row.addWidget(self.volume_value)
         audio_layout.addRow("Master Volume", volume_row)
+        loudness_row = QHBoxLayout()
+        self.loudness_checkbox = QCheckBox("ON")
+        self.loudness_checkbox.setChecked(
+            self.audio_output.loudness_compensation_enabled
+        )
+        self.monitor_gain_value = QLabel("+0.0 dB")
+        loudness_row.addWidget(self.loudness_checkbox)
+        loudness_row.addStretch(1)
+        loudness_row.addWidget(QLabel("Monitor Gain"))
+        loudness_row.addWidget(self.monitor_gain_value)
+        audio_layout.addRow("Loudness Compensation", loudness_row)
         buttons = QHBoxLayout()
         self.start_audio_button = QPushButton("START AUDIO")
         self.stop_audio_button = QPushButton("STOP AUDIO")
@@ -283,6 +295,7 @@ class MainWindow(QMainWindow):
         self.master_controller_slider.valueChanged.connect(self._master_changed)
         self.drive_state_combo.currentTextChanged.connect(self._controls_changed)
         self.volume_slider.valueChanged.connect(self._volume_changed)
+        self.loudness_checkbox.toggled.connect(self._loudness_changed)
         self.start_audio_button.clicked.connect(self._start_audio)
         self.stop_audio_button.clicked.connect(self._stop_audio)
         self.reload_button.clicked.connect(self._reload_profile)
@@ -354,6 +367,13 @@ class MainWindow(QMainWindow):
         self.volume_value.setText(f"{value:d} %")
         self.audio_output.set_master_volume(value / 100.0)
 
+    def _loudness_changed(self, enabled: bool) -> None:
+        self.loudness_checkbox.setText("ON" if enabled else "OFF")
+        self.audio_output.set_loudness_compensation(enabled)
+        self.monitor_gain_value.setText(
+            f"{self.audio_output.monitor_gain_db:+.1f} dB"
+        )
+
     def _start_audio(self) -> None:
         try:
             self.audio_output.start()
@@ -415,6 +435,9 @@ class MainWindow(QMainWindow):
             else new_profile.drive_dynamics.data_notice
         )
         self.audio_output.set_master_volume(self.volume_slider.value() / 100.0)
+        self.audio_output.set_loudness_compensation(
+            self.loudness_checkbox.isChecked()
+        )
         self._listed_drive_state = None
         self._apply_control_mode()
         self._controls_changed()
@@ -456,6 +479,9 @@ class MainWindow(QMainWindow):
             f"{snapshot.fundamental_frequency_hz:.2f} Hz"
         )
         self.status_labels["audio"].setText(self.audio_output.state)
+        self.monitor_gain_value.setText(
+            f"{self.audio_output.monitor_gain_db:+.1f} dB"
+        )
         self._update_transitions(snapshot)
         self._update_plots(snapshot)
 

@@ -80,6 +80,17 @@ class ModulationTests(unittest.TestCase):
             np.count_nonzero(np.diff(three.switching[0])),
         )
 
+    def test_bridge_voltage_level_is_not_double_scaled_by_amplitude(self) -> None:
+        block = VVVFModulator().generate(
+            4800,
+            control_frequency_hz=75.0,
+            mode=ModulationMode.SYNC_PULSE,
+            pulse_count=1,
+            amplitude=0.25,
+            advance_phase=False,
+        )
+        self.assertEqual(float(np.max(np.abs(block.line_voltage_uv))), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

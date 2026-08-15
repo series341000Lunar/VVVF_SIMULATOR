@@ -142,6 +142,43 @@ Loader는 기존 schema version 1 JSON도 control-frequency 내부 모델로 변
 Canonical one-pulse 표현은 v2에서 `mode: SYNC_PULSE`, `pulse_count: 1`입니다.
 v1 loader는 하위 호환성을 위해 기존 `ONE_PULSE` 문자열도 보존합니다.
 
+## Monitor Loudness Compensation
+
+청취용 음량 보정은 VVVF profile amplitude를 변경하지 않고 audio output에만
+적용됩니다.
+
+```text
+Legacy Acoustic Model
+        ↓
+Monitor Loudness Compensation
+        ↓
+Limiter
+        ↓
+Master Volume
+```
+
+PWM modulation index는 switching duty/pulse width를 결정합니다. Normalized bridge
+voltage level에는 amplitude를 다시 곱하지 않아 저속 신호의 중복 감쇠를 피합니다.
+Profile amplitude curve와 pulse transition 자체는 그대로 유지됩니다.
+
+Legacy model은 시작 시 1 Hz 간격의 POWERING sweep을 자동 계산하여 주파수·변조
+모드별 예상 RMS calibration map을 캐시합니다. 기본 target은 -20 dBFS, gain 범위는
+-6…+18 dB이며 주파수 curve smoothing과 150 ms attack/500 ms release를 적용합니다.
+이 값들은 모두 `motor_acoustics.monitor_loudness`의 simulator tuning입니다.
+
+GUI의 `Loudness Compensation` ON/OFF로 즉시 A/B 비교할 수 있으며 기본값은
+ON입니다. 보상 gain은 현재 Coast envelope의 RMS를 추적하지 않으므로 fade-out과
+BRAKING 저주파 cutoff를 되살리지 않습니다.
+
+동일한 diagnostic sweep은 다음 명령으로 CSV 형태로 출력합니다.
+
+```powershell
+python -m tools.audio_rms_sweep
+```
+
+현재 기준 결과는 `research/analysis/mk3_audio_loudness_sweep.csv`에 기록되어
+있습니다.
+
 ## 구현 구조
 
 - `vvvf/frequency.py`: input mapper와 finite clamp
@@ -149,7 +186,8 @@ v1 loader는 하위 호환성을 위해 기존 `ONE_PULSE` 문자열도 보존�
 - `vvvf/profile.py`: v1/v2 validation 및 normalized data model
 - `vvvf/state.py`: input/drive/coast/hysteresis state
 - `vvvf/modulation.py`: vectorized 3상 ASYNC/SYNC/1P switching
-- `vvvf/audio.py`: resonance filter, limiter, smoothing, sounddevice lifecycle
+- `vvvf/loudness.py`: calibration curve, gain clamp, realtime gain smoothing
+- `vvvf/audio.py`: resonance filter, loudness layer, limiter, sounddevice lifecycle
 - `ui/main_window.py`: Qt controls, transition view, plots, profile reload
 
 Audio는 48 kHz/512-sample block으로 생성합니다. limiter, 낮은 기본 master volume,
@@ -171,7 +209,8 @@ python -m unittest discover -s tests -v
 - amplitude keyframe, linear interpolation, discontinuity, braking cutoff, clamp
 - 3상 120도 offset, ASYNC 365 Hz, 27P/15P/3P/1P switching 차이
 - COAST frequency hold, 3P, envelope decay
-- audio finite output, limiter/volume, stream start/stop cleanup
+- audio finite/silence, loudness gain clamp, low/high RMS spread, Coast/Brake 보존
+- loudness ON/OFF와 stream start/stop cleanup
 - GUI startup, input modes, drive states, active transition, waveform와 FFT data
 
 ## 알려진 제한
@@ -185,6 +224,6 @@ python -m unittest discover -s tests -v
 - spectrogram은 아직 없습니다.
 - Motor Acoustic Emulator와 Auto Test/WAV/CSV/Spectrogram workflow는 각각 MK3
   Stage B/C 범위이며 Stage A에는 아직 포함되지 않았습니다.
-- VvvfGeeks YAML importer는 optional 후속 작업이며 이번 core MK2에는 없습니다.
+- VvvfGeeks YAML importer는 optional 후속 작업이며 이번 MK3에는 없습니다.
 - CAN, OBD-II, Bluetooth, serial, ESP32/STM32, gate driver, MOSFET/IGBT,
   고전압 inverter 및 실제 차량 제어는 구현하지 않습니다.
