@@ -1,0 +1,51 @@
+{
+  "name": "Toshiba MCK01C Research",
+  "verified": false,
+  "description": "Placeholder values for simulator development only.",
+  "data_notice": "RESEARCH / PLACEHOLDER PROFILE — NOT VERIFIED MCK01C DATA",
+  "motor_frequency_model": {
+    "type": "linear_scale",
+    "electrical_hz_per_kmh": 0.9
+  },
+  "maximum_modulation_index": 0.95,
+  "powering": [
+    {
+      "speed_start": 0.0,
+      "speed_end": 20.0,
+      "mode": "ASYNC_PWM",
+      "carrier_hz": 450.0
+    },
+    {
+      "speed_start": 20.0,
+      "speed_end": 35.0,
+      "mode": "ASYNC_PWM",
+      "carrier_hz": 600.0
+    },
+    {
+      "speed_start": 35.0,
+      "speed_end": 50.0,
+      "mode": "SYNC_PULSE",
+      "pulse_count": 15
+    },
+    {
+      "speed_start": 50.0,
+      "speed_end": 70.0,
+      "mode": "SYNC_PULSE",
+      "pulse_count": 9
+    },
+    {
+      "speed_start": 70.0,
+      "speed_end": 120.0,
+      "mode": "ONE_PULSE",
+      "pulse_count": 1
+    }
+  ],
+  "motor_acoustics": {
+    "data_notice": "PLACEHOLDER — NOT VERIFIED VEHICLE DATA",
+    "resonances": [
+      {"frequency": 650.0, "gain": 1.5, "q": 4.0},
+      {"frequency": 1200.0, "gain": 2.0, "q": 6.0},
+      {"frequency": 2400.0, "gain": 1.2, "q": 5.0}
+    ]
+  }
+}
