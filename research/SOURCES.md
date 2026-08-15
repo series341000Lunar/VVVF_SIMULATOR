@@ -2,7 +2,7 @@
 
 ## Evidence classification
 
-The MK2 profile is based on values transcribed from a third-party Toshiba
+The MK3 research profile is based on values transcribed from a third-party Toshiba
 MCK01C VVVF recreation video described in the project requirements.
 
 - Evidence level: `observed_from_third_party_recreation`
@@ -15,6 +15,14 @@ MCK01C VVVF recreation video described in the project requirements.
 These observations must not be described as Toshiba factory control data.
 Transition values marked `MEDIUM` and amplitude samples marked `APPROXIMATE`
 may change after frame-accurate review or better source material is supplied.
+
+## Drive-dynamics observation
+
+The Stage A default powering and braking rates are both `3.0 Hz/s`, derived from
+the approximate displayed change of 6 Hz over 2 seconds described in the project
+requirements. This is an observation of a third-party recreation video, not a
+measurement of train acceleration and not Toshiba manufacturer vehicle-dynamics
+data. The values remain configurable in `drive_dynamics` inside the profile.
 
 ## Raw media policy
 

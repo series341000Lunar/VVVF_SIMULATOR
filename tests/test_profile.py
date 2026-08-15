@@ -22,6 +22,10 @@ class ProfileTests(unittest.TestCase):
             profile.evidence_level, "observed_from_third_party_recreation"
         )
         self.assertIn("NOT VERIFIED MANUFACTURER", profile.data_notice)
+        self.assertIsNotNone(profile.drive_dynamics)
+        self.assertEqual(profile.drive_dynamics.power_frequency_rate_hz_per_s, 3.0)
+        self.assertEqual(profile.drive_dynamics.brake_frequency_rate_hz_per_s, 3.0)
+        self.assertIn("NOT MANUFACTURER", profile.drive_dynamics.data_notice)
 
     def test_powering_region_selection_and_half_open_boundaries(self) -> None:
         cases = [

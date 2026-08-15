@@ -36,6 +36,8 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.status_labels["pulse"].text(), "27")
         self.assertTrue(self.window.direct_frequency_spin.isEnabled())
         self.assertFalse(self.window.speed_slider.isEnabled())
+        self.assertFalse(self.window.master_controller_slider.isEnabled())
+        self.assertTrue(self.window.drive_state_combo.isEnabled())
 
     def test_virtual_speed_routes_through_mapper(self) -> None:
         self.window.input_mode_combo.setCurrentText(
@@ -55,6 +57,38 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.status_labels["drive"].text(), "BRAKING")
         self.assertEqual(self.window.status_labels["pulse"].text(), "9")
         self.assertEqual(self.window.transition_list.currentRow(), 2)
+
+    def test_drive_simulation_master_controller_is_authoritative(self) -> None:
+        self.window.input_mode_combo.setCurrentText(InputMode.DRIVE_SIMULATION.value)
+        self.window.master_controller_slider.setValue(100)
+        self.application.processEvents()
+
+        self.assertFalse(self.window.direct_frequency_spin.isEnabled())
+        self.assertFalse(self.window.speed_slider.isEnabled())
+        self.assertFalse(self.window.throttle_slider.isEnabled())
+        self.assertFalse(self.window.drive_state_combo.isEnabled())
+        self.assertTrue(self.window.master_controller_slider.isEnabled())
+        self.assertEqual(
+            self.window.drive_state_combo.currentText(), DriveState.POWERING.value
+        )
+
+        powered = self.window.simulation.advance_time(10.0)
+        self.window._refresh(powered)
+        self.assertEqual(self.window.status_labels["control"].text(), "30.00 Hz")
+        self.assertEqual(self.window.status_labels["master"].text(), "+100")
+        self.assertEqual(self.window.status_labels["drive"].text(), "POWERING")
+
+        self.window.master_controller_slider.setValue(0)
+        coast = self.window.simulation.advance_time(5.0)
+        self.window._refresh(coast)
+        self.assertEqual(self.window.status_labels["control"].text(), "30.00 Hz")
+        self.assertEqual(self.window.status_labels["drive"].text(), "COAST")
+
+        self.window.master_controller_slider.setValue(-100)
+        braked = self.window.simulation.advance_time(10.0)
+        self.window._refresh(braked)
+        self.assertEqual(self.window.status_labels["control"].text(), "0.00 Hz")
+        self.assertEqual(self.window.status_labels["drive"].text(), "BRAKING")
 
     def test_coast_uses_three_pulse_and_holds_control_frequency(self) -> None:
         self.window.direct_frequency_spin.setValue(106.8)

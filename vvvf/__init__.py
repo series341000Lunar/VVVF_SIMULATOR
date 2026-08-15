@@ -1,5 +1,6 @@
-"""Core package for VVVF GTO Simulator MK2."""
+"""Core package for VVVF GTO Simulator MK3."""
 
+from .dynamics import DriveDynamics, DriveDynamicsConfig
 from .frequency import LinearFrequencyMapper
 from .audio import AudioOutput, AudioSynthesizer
 from .model import DriveState, InputMode, InterpolationType, ModulationMode
@@ -11,6 +12,8 @@ from .state import SimulationSnapshot, SimulationState
 __all__ = [
     "AudioOutput",
     "AudioSynthesizer",
+    "DriveDynamics",
+    "DriveDynamicsConfig",
     "DriveState",
     "InputMode",
     "InterpolationType",

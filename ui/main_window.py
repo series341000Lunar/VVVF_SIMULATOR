@@ -1,4 +1,4 @@
-"""MK2 research UI with control-frequency inputs, plots, and safe audio controls."""
+"""MK3 research UI with direct, virtual-speed, and drive-simulation inputs."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         self._listed_drive_state: str | None = None
 
         logging.basicConfig(level=logging.INFO, format="%(message)s")
-        self.setWindowTitle("VVVF GTO Simulator MK2 — Research")
+        self.setWindowTitle("VVVF GTO Simulator MK3 — Drive Dynamics")
         self.setMinimumSize(1120, 760)
         self._build_ui()
         self._apply_control_mode()
@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("VVVF GTO Simulator MK2")
+        title = QLabel("VVVF GTO Simulator MK3")
         title_font = QFont()
         title_font.setPointSize(19)
         title_font.setBold(True)
@@ -101,7 +101,10 @@ class MainWindow(QMainWindow):
         controls = QGroupBox("Input and Drive Controls")
         controls_layout = QFormLayout(controls)
         self.input_mode_combo = QComboBox()
-        self.input_mode_combo.addItems([mode.value for mode in InputMode])
+        input_modes = list(InputMode)
+        if self.profile.drive_dynamics is None:
+            input_modes.remove(InputMode.DRIVE_SIMULATION)
+        self.input_mode_combo.addItems([mode.value for mode in input_modes])
         controls_layout.addRow("Input Mode", self.input_mode_combo)
 
         self.direct_frequency_value = QLabel("0.0 Hz")
@@ -146,6 +149,26 @@ class MainWindow(QMainWindow):
         throttle_row.addWidget(self.throttle_value)
         controls_layout.addRow("Command Level", throttle_row)
 
+        self.master_command_value = QLabel("0 · COAST")
+        master_row = QHBoxLayout()
+        master_brake_label = QLabel("BRAKE")
+        self.master_controller_slider = QSlider(Qt.Orientation.Horizontal)
+        maximum_command = (
+            100
+            if self.profile.drive_dynamics is None
+            else int(round(self.profile.drive_dynamics.controller_maximum_command))
+        )
+        self.master_controller_slider.setRange(-maximum_command, maximum_command)
+        self.master_controller_slider.setValue(0)
+        self.master_controller_slider.setPageStep(10)
+        self.master_controller_slider.setAccessibleName("Master controller")
+        master_power_label = QLabel("POWER")
+        master_row.addWidget(master_brake_label)
+        master_row.addWidget(self.master_controller_slider, 1)
+        master_row.addWidget(master_power_label)
+        master_row.addWidget(self.master_command_value)
+        controls_layout.addRow("Master Controller", master_row)
+
         self.drive_state_combo = QComboBox()
         self.drive_state_combo.addItems([state.value for state in DriveState])
         controls_layout.addRow("Drive State", self.drive_state_combo)
@@ -157,6 +180,7 @@ class MainWindow(QMainWindow):
             ("input", "Input Mode"),
             ("speed", "Vehicle Speed"),
             ("control", "Control Frequency"),
+            ("master", "Master Command"),
             ("drive", "Drive State"),
             ("mode", "Modulation Mode"),
             ("carrier", "Carrier Frequency"),
@@ -202,6 +226,14 @@ class MainWindow(QMainWindow):
         self.mapping_notice.setObjectName("mappingNotice")
         self.mapping_notice.setWordWrap(True)
         left_layout.addWidget(self.mapping_notice)
+        self.dynamics_notice = QLabel(
+            "Drive simulation unavailable for this profile"
+            if self.profile.drive_dynamics is None
+            else self.profile.drive_dynamics.data_notice
+        )
+        self.dynamics_notice.setObjectName("dynamicsNotice")
+        self.dynamics_notice.setWordWrap(True)
+        left_layout.addWidget(self.dynamics_notice)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -238,6 +270,8 @@ class MainWindow(QMainWindow):
             "background: #fff7ed; border: 1px solid #fdba74; padding: 7px; }"
             "QLabel#mappingNotice { color: #854d0e; background: #fefce8; "
             "border: 1px solid #fde047; padding: 6px; }"
+            "QLabel#dynamicsNotice { color: #7c2d12; background: #fff7ed; "
+            "border: 1px solid #fdba74; padding: 6px; }"
         )
         self.setCentralWidget(root)
 
@@ -246,6 +280,7 @@ class MainWindow(QMainWindow):
         self.direct_frequency_spin.valueChanged.connect(self._direct_spin_changed)
         self.speed_slider.valueChanged.connect(self._controls_changed)
         self.throttle_slider.valueChanged.connect(self._controls_changed)
+        self.master_controller_slider.valueChanged.connect(self._master_changed)
         self.drive_state_combo.currentTextChanged.connect(self._controls_changed)
         self.volume_slider.valueChanged.connect(self._volume_changed)
         self.start_audio_button.clicked.connect(self._start_audio)
@@ -261,9 +296,19 @@ class MainWindow(QMainWindow):
             self.input_mode_combo.currentText()
             == InputMode.DIRECT_CONTROL_FREQUENCY.value
         )
+        virtual_speed = (
+            self.input_mode_combo.currentText()
+            == InputMode.VIRTUAL_VEHICLE_SPEED.value
+        )
+        drive_simulation = (
+            self.input_mode_combo.currentText() == InputMode.DRIVE_SIMULATION.value
+        )
         self.direct_frequency_slider.setEnabled(direct)
         self.direct_frequency_spin.setEnabled(direct)
-        self.speed_slider.setEnabled(not direct)
+        self.speed_slider.setEnabled(virtual_speed)
+        self.throttle_slider.setEnabled(not drive_simulation)
+        self.master_controller_slider.setEnabled(drive_simulation)
+        self.drive_state_combo.setEnabled(not drive_simulation)
 
     def _direct_slider_changed(self, value: int) -> None:
         with QSignalBlocker(self.direct_frequency_spin):
@@ -275,6 +320,21 @@ class MainWindow(QMainWindow):
             self.direct_frequency_slider.setValue(int(round(value * 10)))
         self._controls_changed()
 
+    def _master_changed(self, value: int) -> None:
+        self._update_master_command_label(float(value))
+        self._controls_changed()
+
+    def _update_master_command_label(self, command: float) -> None:
+        dynamics = self.profile.drive_dynamics
+        dead_zone = 0.0 if dynamics is None else dynamics.controller_dead_zone
+        if command > dead_zone:
+            state = DriveState.POWERING.value
+        elif command < -dead_zone:
+            state = DriveState.BRAKING.value
+        else:
+            state = DriveState.COAST.value
+        self.master_command_value.setText(f"{command:+.0f} · {state}")
+
     def _controls_changed(self, *_args: object) -> None:
         snapshot = self.simulation.set_controls(
             vehicle_speed_kmh=self.speed_slider.value() / 10.0,
@@ -282,7 +342,11 @@ class MainWindow(QMainWindow):
             input_mode=self.input_mode_combo.currentText(),
             throttle_percent=self.throttle_slider.value(),
             drive_state=self.drive_state_combo.currentText(),
+            master_command=self.master_controller_slider.value(),
         )
+        if snapshot.input_mode == InputMode.DRIVE_SIMULATION.value:
+            with QSignalBlocker(self.drive_state_combo):
+                self.drive_state_combo.setCurrentText(snapshot.drive_state)
         self._latest_snapshot = snapshot
         self._refresh(snapshot)
 
@@ -320,22 +384,44 @@ class MainWindow(QMainWindow):
             new_profile.maximum_control_frequency_hz,
         )
         self.speed_slider.setMaximum(int(round(new_profile.maximum_speed * 10)))
+        current_input_mode = self.input_mode_combo.currentText()
+        available_input_modes = list(InputMode)
+        if new_profile.drive_dynamics is None:
+            available_input_modes.remove(InputMode.DRIVE_SIMULATION)
+        available_input_values = [mode.value for mode in available_input_modes]
+        with QSignalBlocker(self.input_mode_combo):
+            self.input_mode_combo.clear()
+            self.input_mode_combo.addItems(available_input_values)
+            self.input_mode_combo.setCurrentText(
+                current_input_mode
+                if current_input_mode in available_input_values
+                else InputMode.DIRECT_CONTROL_FREQUENCY.value
+            )
+        maximum_command = (
+            100
+            if new_profile.drive_dynamics is None
+            else int(round(new_profile.drive_dynamics.controller_maximum_command))
+        )
+        self.master_controller_slider.setRange(-maximum_command, maximum_command)
         self.profile_label.setText(
             f"Profile: {new_profile.name} · schema v{new_profile.schema_version} · "
             f"evidence: {new_profile.evidence_level}"
         )
         self.notice_label.setText(new_profile.data_notice)
         self.mapping_notice.setText(new_profile.frequency_mapper.data_notice)
+        self.dynamics_notice.setText(
+            "Drive simulation unavailable for this profile"
+            if new_profile.drive_dynamics is None
+            else new_profile.drive_dynamics.data_notice
+        )
         self.audio_output.set_master_volume(self.volume_slider.value() / 100.0)
         self._listed_drive_state = None
+        self._apply_control_mode()
         self._controls_changed()
 
     def _tick(self) -> None:
         elapsed_seconds = max(self._elapsed.restart(), 0) / 1000.0
-        if self.simulation.drive_state is DriveState.COAST:
-            snapshot = self.simulation.advance_time(elapsed_seconds)
-        else:
-            snapshot = self.simulation.snapshot()
+        snapshot = self.simulation.advance_time(elapsed_seconds)
         self._latest_snapshot = snapshot
         self._refresh(snapshot)
 
@@ -345,9 +431,16 @@ class MainWindow(QMainWindow):
             f"{snapshot.direct_control_frequency_hz:.1f} Hz"
         )
         self.throttle_value.setText(f"{snapshot.throttle_percent:d} %")
+        self._update_master_command_label(snapshot.master_command)
+        if snapshot.input_mode == InputMode.DRIVE_SIMULATION.value:
+            with QSignalBlocker(self.speed_slider):
+                self.speed_slider.setValue(
+                    int(round(snapshot.vehicle_speed_kmh * 10.0))
+                )
         self.status_labels["input"].setText(snapshot.input_mode)
         self.status_labels["speed"].setText(f"{snapshot.vehicle_speed_kmh:.1f} km/h")
         self.status_labels["control"].setText(f"{snapshot.control_frequency_hz:.2f} Hz")
+        self.status_labels["master"].setText(f"{snapshot.master_command:+.0f}")
         self.status_labels["drive"].setText(snapshot.drive_state)
         self.status_labels["mode"].setText(snapshot.mode)
         self.status_labels["carrier"].setText(

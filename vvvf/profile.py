@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .dynamics import DriveDynamicsConfig
 from .frequency import LinearFrequencyMapper, clamp_finite
 from .model import DriveState, InterpolationType, ModulationMode
 
@@ -111,6 +112,7 @@ class VVVFProfile:
     transition_hysteresis_hz: float
     patterns: dict[DriveState, DrivePattern]
     coast: CoastProfile
+    drive_dynamics: DriveDynamicsConfig | None
     motor_acoustics: dict[str, Any]
     source_path: Path
 
@@ -450,6 +452,7 @@ def _load_v1(raw: dict[str, Any], source_path: Path) -> VVVFProfile:
             "LEGACY MK1 COAST",
             ((0.0, 0.0), (1.0, 0.0)),
         ),
+        drive_dynamics=None,
         motor_acoustics=dict(raw.get("motor_acoustics", {})),
         source_path=source_path,
     )
@@ -570,6 +573,52 @@ def _load_v2(raw: dict[str, Any], source_path: Path) -> VVVFProfile:
         ),
         tuple(envelope),
     )
+    dynamics_raw = raw.get("drive_dynamics")
+    drive_dynamics: DriveDynamicsConfig | None = None
+    if dynamics_raw is not None:
+        if not isinstance(dynamics_raw, dict):
+            raise ProfileError("profile.drive_dynamics must be an object")
+        try:
+            drive_dynamics = DriveDynamicsConfig(
+                power_frequency_rate_hz_per_s=_finite_number(
+                    _required(
+                        dynamics_raw,
+                        "power_frequency_rate_hz_per_s",
+                        "drive_dynamics",
+                    ),
+                    "drive_dynamics.power_frequency_rate_hz_per_s",
+                ),
+                brake_frequency_rate_hz_per_s=_finite_number(
+                    _required(
+                        dynamics_raw,
+                        "brake_frequency_rate_hz_per_s",
+                        "drive_dynamics",
+                    ),
+                    "drive_dynamics.brake_frequency_rate_hz_per_s",
+                ),
+                controller_dead_zone=_finite_number(
+                    _required(
+                        dynamics_raw,
+                        "controller_dead_zone",
+                        "drive_dynamics",
+                    ),
+                    "drive_dynamics.controller_dead_zone",
+                ),
+                controller_maximum_command=_finite_number(
+                    _required(
+                        dynamics_raw,
+                        "controller_maximum_command",
+                        "drive_dynamics",
+                    ),
+                    "drive_dynamics.controller_maximum_command",
+                ),
+                data_notice=_nonempty_string(
+                    _required(dynamics_raw, "data_notice", "drive_dynamics"),
+                    "drive_dynamics.data_notice",
+                ),
+            )
+        except ValueError as exc:
+            raise ProfileError(str(exc)) from exc
     return VVVFProfile(
         schema_version=2,
         name=name,
@@ -583,6 +632,7 @@ def _load_v2(raw: dict[str, Any], source_path: Path) -> VVVFProfile:
         transition_hysteresis_hz=hysteresis,
         patterns=patterns,
         coast=coast,
+        drive_dynamics=drive_dynamics,
         motor_acoustics=dict(raw.get("motor_acoustics", {})),
         source_path=source_path,
     )

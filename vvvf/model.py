@@ -8,6 +8,7 @@ from enum import StrEnum
 class InputMode(StrEnum):
     DIRECT_CONTROL_FREQUENCY = "DIRECT CONTROL FREQ"
     VIRTUAL_VEHICLE_SPEED = "VIRTUAL SPEED"
+    DRIVE_SIMULATION = "DRIVE SIMULATION"
 
 
 class DriveState(StrEnum):

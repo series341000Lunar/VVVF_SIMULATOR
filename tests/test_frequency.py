@@ -25,6 +25,13 @@ class FrequencyArchitectureTests(unittest.TestCase):
         )
         self.assertAlmostEqual(snapshot.control_frequency_hz, 53.4)
 
+    def test_inverse_mapper_round_trips_control_frequency(self) -> None:
+        mapper = self.profile.frequency_mapper
+        for frequency in (0.0, 8.5, 53.4, 106.8):
+            with self.subTest(control_frequency_hz=frequency):
+                speed = mapper.unmap_control_frequency(frequency)
+                self.assertAlmostEqual(mapper.map_speed(speed), frequency)
+
     def test_direct_frequency_bypasses_vehicle_speed(self) -> None:
         state = SimulationState(self.profile)
         snapshot = state.set_controls(

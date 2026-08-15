@@ -20,6 +20,13 @@
     "max_control_frequency_hz": 106.8
   },
   "transition_hysteresis_hz": 0.15,
+  "drive_dynamics": {
+    "power_frequency_rate_hz_per_s": 3.0,
+    "brake_frequency_rate_hz_per_s": 3.0,
+    "controller_dead_zone": 2.0,
+    "controller_maximum_command": 100.0,
+    "data_notice": "OBSERVED APPROXIMATION FROM THIRD-PARTY RECREATION VIDEO — NOT MANUFACTURER VEHICLE DYNAMICS"
+  },
   "powering": {
     "regions": [
       {"control_frequency_start_hz": 0.0, "control_frequency_end_hz": 8.5, "mode": "ASYNC_PWM", "carrier_frequency_hz": 365.0, "label": "ASYNC 365 Hz"},

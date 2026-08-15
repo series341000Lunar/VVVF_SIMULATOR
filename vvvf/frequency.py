@@ -50,3 +50,18 @@ class LinearFrequencyMapper:
         return self.control_frequency_min_hz + ratio * (
             self.control_frequency_max_hz - self.control_frequency_min_hz
         )
+
+    def unmap_control_frequency(self, control_frequency_hz: float) -> float:
+        """Map a bounded control frequency back to virtual vehicle speed."""
+        frequency = clamp_finite(
+            control_frequency_hz,
+            self.control_frequency_min_hz,
+            self.control_frequency_max_hz,
+            "control_frequency_hz",
+        )
+        ratio = (frequency - self.control_frequency_min_hz) / (
+            self.control_frequency_max_hz - self.control_frequency_min_hz
+        )
+        return self.vehicle_speed_min_kmh + ratio * (
+            self.vehicle_speed_max_kmh - self.vehicle_speed_min_kmh
+        )
