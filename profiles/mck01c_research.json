@@ -1,51 +1,93 @@
 {
-  "name": "Toshiba MCK01C Research",
-  "verified": false,
-  "description": "Placeholder values for simulator development only.",
-  "data_notice": "RESEARCH / PLACEHOLDER PROFILE — NOT VERIFIED MCK01C DATA",
-  "motor_frequency_model": {
-    "type": "linear_scale",
-    "electrical_hz_per_kmh": 0.9
+  "schema_version": 2,
+  "metadata": {
+    "name": "Toshiba MCK01C Research",
+    "verified": false,
+    "evidence_level": "observed_from_third_party_recreation",
+    "description": "Observed from a third-party Toshiba MCK01C VVVF recreation video. Not verified manufacturer control data.",
+    "data_notice": "RESEARCH PROFILE — OBSERVED FROM THIRD-PARTY RECREATION — NOT VERIFIED MANUFACTURER CONTROL DATA"
   },
-  "maximum_modulation_index": 0.95,
-  "powering": [
-    {
-      "speed_start": 0.0,
-      "speed_end": 20.0,
-      "mode": "ASYNC_PWM",
-      "carrier_hz": 450.0
-    },
-    {
-      "speed_start": 20.0,
-      "speed_end": 35.0,
-      "mode": "ASYNC_PWM",
-      "carrier_hz": 600.0
-    },
-    {
-      "speed_start": 35.0,
-      "speed_end": 50.0,
-      "mode": "SYNC_PULSE",
-      "pulse_count": 15
-    },
-    {
-      "speed_start": 50.0,
-      "speed_end": 70.0,
-      "mode": "SYNC_PULSE",
-      "pulse_count": 9
-    },
-    {
-      "speed_start": 70.0,
-      "speed_end": 120.0,
-      "mode": "ONE_PULSE",
-      "pulse_count": 1
+  "input_mapping": {
+    "type": "linear",
+    "vehicle_speed_min_kmh": 0.0,
+    "vehicle_speed_max_kmh": 120.0,
+    "control_frequency_min_hz": 0.0,
+    "control_frequency_max_hz": 106.8,
+    "data_notice": "SIMULATOR TUNING — NOT VERIFIED MCK01C VEHICLE DATA"
+  },
+  "limits": {
+    "min_control_frequency_hz": 0.0,
+    "max_control_frequency_hz": 106.8
+  },
+  "transition_hysteresis_hz": 0.15,
+  "powering": {
+    "regions": [
+      {"control_frequency_start_hz": 0.0, "control_frequency_end_hz": 8.5, "mode": "ASYNC_PWM", "carrier_frequency_hz": 365.0, "label": "ASYNC 365 Hz"},
+      {"control_frequency_start_hz": 8.5, "control_frequency_end_hz": 16.0, "mode": "SYNC_PULSE", "pulse_count": 27, "label": "27P"},
+      {"control_frequency_start_hz": 16.0, "control_frequency_end_hz": 30.0, "mode": "SYNC_PULSE", "pulse_count": 15, "label": "15P"},
+      {"control_frequency_start_hz": 30.0, "control_frequency_end_hz": 48.0, "mode": "SYNC_PULSE", "pulse_count": 9, "label": "9P"},
+      {"control_frequency_start_hz": 48.0, "control_frequency_end_hz": 60.0, "mode": "SYNC_PULSE", "pulse_count": 5, "label": "5P"},
+      {"control_frequency_start_hz": 60.0, "control_frequency_end_hz": 73.0, "mode": "SYNC_PULSE", "pulse_count": 3, "label": "3P"},
+      {"control_frequency_start_hz": 73.0, "control_frequency_end_hz": 106.8, "mode": "SYNC_PULSE", "pulse_count": 1, "label": "1P"}
+    ],
+    "amplitude": {
+      "keyframes": [
+        {"control_frequency_hz": 0.0, "amplitude": 0.0, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 22.7, "amplitude": 0.243, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 37.9, "amplitude": 0.406, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 47.7, "amplitude": 0.513, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 48.1, "amplitude": 0.516, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 48.5, "amplitude": 0.659, "interpolation": "STEP"},
+        {"control_frequency_hz": 73.3, "amplitude": 1.0, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 106.8, "amplitude": 1.0, "interpolation": "HOLD"}
+      ]
     }
-  ],
+  },
+  "braking": {
+    "regions": [
+      {"control_frequency_start_hz": 0.0, "control_frequency_end_hz": 16.0, "mode": "SYNC_PULSE", "pulse_count": 27, "label": "27P"},
+      {"control_frequency_start_hz": 16.0, "control_frequency_end_hz": 30.0, "mode": "SYNC_PULSE", "pulse_count": 15, "label": "15P"},
+      {"control_frequency_start_hz": 30.0, "control_frequency_end_hz": 50.0, "mode": "SYNC_PULSE", "pulse_count": 9, "label": "9P"},
+      {"control_frequency_start_hz": 50.0, "control_frequency_end_hz": 74.0, "mode": "SYNC_PULSE", "pulse_count": 5, "label": "5P"},
+      {"control_frequency_start_hz": 74.0, "control_frequency_end_hz": 100.0, "mode": "SYNC_PULSE", "pulse_count": 3, "label": "3P"},
+      {"control_frequency_start_hz": 100.0, "control_frequency_end_hz": 106.8, "mode": "SYNC_PULSE", "pulse_count": 1, "label": "1P"}
+    ],
+    "amplitude": {
+      "keyframes": [
+        {"control_frequency_hz": 0.0, "amplitude": 0.0, "interpolation": "HOLD"},
+        {"control_frequency_hz": 7.3, "amplitude": 0.0, "interpolation": "HOLD"},
+        {"control_frequency_hz": 7.5, "amplitude": 0.063, "interpolation": "STEP"},
+        {"control_frequency_hz": 7.9, "amplitude": 0.064, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 8.1, "amplitude": 0.067, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 8.4, "amplitude": 0.069, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 15.7, "amplitude": 0.127, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 29.5, "amplitude": 0.235, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 49.3, "amplitude": 0.39, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 50.7, "amplitude": 0.503, "interpolation": "LINEAR"},
+        {"control_frequency_hz": 106.8, "amplitude": 1.0, "interpolation": "LINEAR"}
+      ]
+    }
+  },
+  "coast": {
+    "mode": "SYNC_PULSE",
+    "pulse_count": 3,
+    "hold_control_frequency": true,
+    "decay_seconds": 4.0,
+    "decay_notice": "SIMULATOR TUNING — NOT VERIFIED SOURCE TIMING DATA",
+    "amplitude_envelope": [
+      {"progress": 0.0, "amplitude": 0.827},
+      {"progress": 0.25, "amplitude": 0.604},
+      {"progress": 0.5, "amplitude": 0.444},
+      {"progress": 0.75, "amplitude": 0.28},
+      {"progress": 1.0, "amplitude": 0.0}
+    ]
+  },
   "motor_acoustics": {
-    "data_notice": "PLACEHOLDER — NOT VERIFIED VEHICLE DATA",
+    "data_notice": "SIMULATOR TUNING — NOT VERIFIED MCK01C VEHICLE DATA",
     "resonances": [
-      {"frequency": 650.0, "gain": 1.5, "q": 4.0},
-      {"frequency": 1200.0, "gain": 2.0, "q": 6.0},
-      {"frequency": 2400.0, "gain": 1.2, "q": 5.0}
+      {"frequency_hz": 650.0, "gain": 1.5, "q": 4.0},
+      {"frequency_hz": 1200.0, "gain": 2.0, "q": 6.0},
+      {"frequency_hz": 2400.0, "gain": 1.2, "q": 5.0}
     ]
   }
 }

@@ -1,96 +1,234 @@
-"""UI-independent Stage A simulation state and derived status values."""
+"""UI-independent MK2 input, control-frequency, and drive-state model."""
 
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
-from .motor_model import LinearMotorFrequencyModel
-from .profile import VVVFProfile
+from .frequency import clamp_finite
+from .model import DriveState, InputMode
+from .profile import ModulationRegion, VVVFProfile
 
 
 LOGGER = logging.getLogger("vvvf")
-VALID_DIRECTIONS = frozenset({"POWERING", "COAST"})
 
 
 @dataclass(frozen=True, slots=True)
 class SimulationSnapshot:
-    speed_kmh: float
+    vehicle_speed_kmh: float
+    direct_control_frequency_hz: float
+    control_frequency_hz: float
+    input_mode: str
     throttle_percent: int
-    direction: str
-    electrical_frequency_hz: float
+    drive_state: str
     fundamental_frequency_hz: float
     mode: str
-    carrier_hz: float | None
+    carrier_frequency_hz: float | None
     pulse_count: int | None
-    modulation_index: float
+    amplitude: float
     audio_state: str
+    region_start_hz: float | None
+    region_end_hz: float | None
+    coast_elapsed_seconds: float
+
+    @property
+    def speed_kmh(self) -> float:
+        return self.vehicle_speed_kmh
+
+    @property
+    def direction(self) -> str:
+        return self.drive_state
+
+    @property
+    def electrical_frequency_hz(self) -> float:
+        return self.control_frequency_hz
+
+    @property
+    def carrier_hz(self) -> float | None:
+        return self.carrier_frequency_hz
+
+    @property
+    def modulation_index(self) -> float:
+        return self.amplitude
 
 
 class SimulationState:
     def __init__(self, profile: VVVFProfile) -> None:
         self.profile = profile
-        self.speed_kmh = 0.0
+        self.vehicle_speed_kmh = 0.0
+        self.direct_control_frequency_hz = 0.0
         self.throttle_percent = 0
-        self.direction = "POWERING"
-        self._motor_model = LinearMotorFrequencyModel(profile.electrical_hz_per_kmh)
-        self._last_transition: tuple[str, float | None, int | None] | None = None
+        self.input_mode = InputMode.VIRTUAL_VEHICLE_SPEED
+        self.drive_state = DriveState.POWERING
+        self._active_region: ModulationRegion | None = None
+        self._active_region_state: DriveState | None = None
+        self._coast_hold_frequency_hz = 0.0
+        self._coast_start_amplitude = 0.0
+        self._coast_elapsed_seconds = 0.0
+        self._last_transition: tuple[str, str, float | None, int | None] | None = None
+
+    @property
+    def speed_kmh(self) -> float:
+        return self.vehicle_speed_kmh
+
+    @property
+    def direction(self) -> str:
+        return self.drive_state.value
+
+    def _requested_control_frequency(self) -> float:
+        if self.input_mode is InputMode.DIRECT_CONTROL_FREQUENCY:
+            return self.profile.clamp_control_frequency(self.direct_control_frequency_hz)
+        return self.profile.clamp_control_frequency(
+            self.profile.frequency_mapper.map_speed(self.vehicle_speed_kmh)
+        )
+
+    def _select_region(self, control_frequency_hz: float) -> ModulationRegion:
+        candidate = self.profile.region_for_control_frequency(
+            control_frequency_hz, self.drive_state
+        )
+        hysteresis = (
+            0.0
+            if self.input_mode is InputMode.DIRECT_CONTROL_FREQUENCY
+            else self.profile.transition_hysteresis_hz
+        )
+        previous = self._active_region
+        if (
+            hysteresis > 0
+            and previous is not None
+            and self._active_region_state is self.drive_state
+            and candidate is not previous
+            and previous.control_frequency_start_hz - hysteresis
+            <= control_frequency_hz
+            <= previous.control_frequency_end_hz + hysteresis
+        ):
+            return previous
+        self._active_region = candidate
+        self._active_region_state = self.drive_state
+        return candidate
 
     def set_controls(
         self,
         *,
-        speed_kmh: float | None = None,
+        vehicle_speed_kmh: float | None = None,
+        direct_control_frequency_hz: float | None = None,
+        input_mode: InputMode | str | None = None,
         throttle_percent: int | None = None,
+        drive_state: DriveState | str | None = None,
+        speed_kmh: float | None = None,
         direction: str | None = None,
     ) -> SimulationSnapshot:
         if speed_kmh is not None:
-            self.speed_kmh = min(max(float(speed_kmh), 0.0), self.profile.maximum_speed)
-        if throttle_percent is not None:
-            self.throttle_percent = min(max(int(throttle_percent), 0), 100)
+            vehicle_speed_kmh = speed_kmh
         if direction is not None:
-            if direction not in VALID_DIRECTIONS:
-                raise ValueError(f"Unsupported direction/state: {direction}")
-            self.direction = direction
+            drive_state = direction
+        if vehicle_speed_kmh is not None:
+            self.vehicle_speed_kmh = clamp_finite(
+                vehicle_speed_kmh,
+                self.profile.frequency_mapper.vehicle_speed_min_kmh,
+                self.profile.frequency_mapper.vehicle_speed_max_kmh,
+                "vehicle_speed_kmh",
+            )
+        if direct_control_frequency_hz is not None:
+            self.direct_control_frequency_hz = self.profile.clamp_control_frequency(
+                direct_control_frequency_hz
+            )
+        if input_mode is not None:
+            self.input_mode = InputMode(input_mode)
+        if throttle_percent is not None:
+            if isinstance(throttle_percent, bool):
+                raise ValueError("throttle_percent must be an integer")
+            self.throttle_percent = min(max(int(throttle_percent), 0), 100)
+        next_state = self.drive_state if drive_state is None else DriveState(drive_state)
+        if next_state is DriveState.COAST and self.drive_state is not DriveState.COAST:
+            frequency = self._requested_control_frequency()
+            self._coast_hold_frequency_hz = frequency
+            if self.drive_state in self.profile.patterns:
+                self._coast_start_amplitude = (
+                    self.profile.amplitude_for_control_frequency(frequency, self.drive_state)
+                    * self.throttle_percent
+                    / 100.0
+                )
+            else:
+                self._coast_start_amplitude = 0.0
+            self._coast_elapsed_seconds = 0.0
+        if next_state is not self.drive_state:
+            self._active_region = None
+            self._active_region_state = None
+        self.drive_state = next_state
+        return self.snapshot()
+
+    def advance_time(self, delta_seconds: float) -> SimulationSnapshot:
+        delta = float(delta_seconds)
+        if not math.isfinite(delta) or delta < 0:
+            raise ValueError("delta_seconds must be finite and non-negative")
+        if self.drive_state is DriveState.COAST:
+            self._coast_elapsed_seconds += delta
         return self.snapshot()
 
     def snapshot(self) -> SimulationSnapshot:
-        electrical_hz = self._motor_model.electrical_frequency(self.speed_kmh)
-        if self.direction == "COAST":
-            mode = "COAST"
-            carrier_hz = None
-            pulse_count = None
-            modulation_index = 0.0
-        else:
-            region = self.profile.region_for_speed(self.speed_kmh)
-            mode = region.mode
-            carrier_hz = region.carrier_hz
-            pulse_count = region.pulse_count
-            modulation_index = (
-                self.throttle_percent / 100.0 * self.profile.maximum_modulation_index
+        requested_frequency = self._requested_control_frequency()
+        if self.drive_state is DriveState.COAST:
+            control_frequency = (
+                self._coast_hold_frequency_hz
+                if self.profile.coast.hold_control_frequency
+                else requested_frequency
             )
-
-        transition = (mode, carrier_hz, pulse_count)
+            mode = (
+                "COAST" if self.profile.coast.mode is None else self.profile.coast.mode.value
+            )
+            carrier_frequency = None
+            pulse_count = self.profile.coast.pulse_count
+            amplitude = self._coast_start_amplitude * self.profile.coast.envelope_gain(
+                self._coast_elapsed_seconds
+            )
+            region_start = None
+            region_end = None
+        else:
+            control_frequency = requested_frequency
+            region = self._select_region(control_frequency)
+            mode = region.mode.value
+            carrier_frequency = region.carrier_frequency_hz
+            pulse_count = region.pulse_count
+            amplitude = (
+                self.profile.amplitude_for_control_frequency(
+                    control_frequency, self.drive_state
+                )
+                * self.throttle_percent
+                / 100.0
+            )
+            region_start = region.control_frequency_start_hz
+            region_end = region.control_frequency_end_hz
+        transition = (self.drive_state.value, mode, carrier_frequency, pulse_count)
         if transition != self._last_transition:
-            details = []
-            if carrier_hz is not None:
-                details.append(f"carrier={carrier_hz:g} Hz")
+            details: list[str] = []
+            if carrier_frequency is not None:
+                details.append(f"carrier={carrier_frequency:g} Hz")
             if pulse_count is not None:
                 details.append(f"pulse={pulse_count}P")
             suffix = f" ({', '.join(details)})" if details else ""
             LOGGER.info(
-                "[VVVF] %.1f km/h transition -> %s%s", self.speed_kmh, mode, suffix
+                "[VVVF] %.1f Hz %s transition -> %s%s",
+                control_frequency,
+                self.drive_state.value,
+                mode,
+                suffix,
             )
             self._last_transition = transition
-
         return SimulationSnapshot(
-            speed_kmh=self.speed_kmh,
+            vehicle_speed_kmh=self.vehicle_speed_kmh,
+            direct_control_frequency_hz=self.direct_control_frequency_hz,
+            control_frequency_hz=control_frequency,
+            input_mode=self.input_mode.value,
             throttle_percent=self.throttle_percent,
-            direction=self.direction,
-            electrical_frequency_hz=electrical_hz,
-            fundamental_frequency_hz=electrical_hz,
+            drive_state=self.drive_state.value,
+            fundamental_frequency_hz=control_frequency,
             mode=mode,
-            carrier_hz=carrier_hz,
+            carrier_frequency_hz=carrier_frequency,
             pulse_count=pulse_count,
-            modulation_index=modulation_index,
-            audio_state="NOT IMPLEMENTED (Stage D)",
+            amplitude=min(max(amplitude, 0.0), 1.0),
+            audio_state="NOT IMPLEMENTED",
+            region_start_hz=region_start,
+            region_end_hz=region_end,
+            coast_elapsed_seconds=self._coast_elapsed_seconds,
         )

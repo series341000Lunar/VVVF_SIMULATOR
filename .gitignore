@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .idea/
 .vscode/
+research/raw/*
+!research/raw/.gitkeep
+*.mp4

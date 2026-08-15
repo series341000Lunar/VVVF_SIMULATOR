@@ -1,28 +1,45 @@
-# VVVF GTO Simulator MK1
+# VVVF GTO Simulator MK2
 
-PC 안에서 철도용 VVVF 변조를 계산하고, 파형과 스펙트럼을 시각화하며,
-합성된 가상 모터음을 실시간 재생하기 위한 Python 연구용 시뮬레이터입니다.
-녹음된 MP3/WAV의 속도를 바꿔 재생하는 프로그램이 아닙니다.
+철도용 VVVF 변조 패턴을 PC에서 연구하기 위한 Python 시뮬레이터입니다.
+녹음된 MP3/WAV를 속도에 맞춰 재생하지 않고, 외부 프로파일에 따라 3상 기준파와
+PWM switching을 계산하여 waveform, FFT, 가상 모터음에 반영합니다.
 
-> **현재 상태: Stage A** — 외부 프로파일, 속도/스로틀/운전 상태 GUI,
-> 전기 주파수와 현재 변조 구간 상태 표시까지 구현되어 있습니다.
+현재 구조의 핵심은 vehicle speed와 inverter control을 분리하는 것입니다.
 
-## 매우 중요한 데이터 고지
+```text
+DIRECT CONTROL FREQUENCY ─┐
+                          ├─> Control Frequency [Hz]
+VIRTUAL VEHICLE SPEED ────┘        │
+  └─ configurable mapper           ├─> POWERING / COAST / BRAKING profile
+                                   ├─> Modulation + amplitude
+                                   └─> Waveform / FFT / audio
+```
 
-`profiles/mck01c_research.json`은 다음 목적의 초기 개발용 데이터입니다.
+VVVF modulation engine은 `vehicle_speed_kmh`를 받지 않습니다. 속도 입력은 반드시
+`LinearFrequencyMapper`를 거쳐 `control_frequency_hz`로 변환됩니다.
 
-**RESEARCH / PLACEHOLDER PROFILE — NOT VERIFIED MCK01C DATA**
+## 데이터 신뢰성 고지
 
-속도 경계, 캐리어 주파수, 펄스 수, 주파수 변환 계수, 음향 공진값은 실제
-Toshiba MCK01C의 검증된 수치가 아닙니다. 향후 조사된 자료는 프로그램 코드가
-아닌 JSON 프로파일에 입력하도록 설계합니다.
+`profiles/mck01c_research.json`은 Toshiba 제조사 공식 control table이 아닙니다.
 
-## 요구 환경과 설치
+> **Observed from a third-party Toshiba MCK01C VVVF recreation video.**
+>
+> **Not verified manufacturer control data.**
 
-- Windows 10/11
-- Python 3.11 이상
-- PySide6
-- 이후 단계용 NumPy, SciPy, sounddevice, pyqtgraph
+- `verified: false`
+- `evidence_level: observed_from_third_party_recreation`
+- transition과 amplitude 수치는 제3자 재현 영상에서 판독한 연구 관찰값
+- 0–120 km/h → 0–106.8 Hz mapping은 `SIMULATOR TUNING`
+- 4.0초 coast decay는 `NOT VERIFIED SOURCE TIMING DATA`
+- motor resonance 값도 실제 차량 검증값이 아닌 simulator tuning
+
+관찰 원본의 전사본은 `research/observations/mck01c_observed.csv`, 출처 및 제한은
+`research/SOURCES.md`에 기록합니다. 분석용 MP4는 `research/raw/`에 로컬로 둘 수
+있지만 Git에 포함되지 않습니다.
+
+## 설치와 실행
+
+요구 환경은 Windows 10/11과 Python 3.11 이상입니다.
 
 ```powershell
 python -m venv .venv
@@ -32,44 +49,90 @@ pip install -r requirements.txt
 python main.py
 ```
 
-다른 프로파일은 `--profile`로 선택할 수 있습니다.
+다른 JSON profile을 지정할 수 있습니다.
 
 ```powershell
 python main.py --profile .\profiles\mck01c_research.json
 ```
 
-## Stage A 기능
+처음 실행할 때 audio는 정지 상태이며 master volume은 20%입니다. `START AUDIO`를
+누르기 전에 Windows 출력 장치와 시스템 볼륨을 확인하십시오.
 
-- 0.0~120.0 km/h 속도 슬라이더(0.1 km/h 단위)
-- 0~100% Power / Throttle 슬라이더
-- `POWERING` / `COAST` 상태 선택
-- 속도 × 프로파일 계수로 계산하는 교체 가능한 전기 주파수 모델
-- 외부 JSON에 따른 현재 ASYNC/SYNC/ONE_PULSE 구간 선택과 상태 표시
-- Carrier Frequency, Pulse Count, Modulation Index, Fundamental Frequency 표시
-- 변조 구간이 달라질 때만 console transition log 출력
-- 미검증 MCK01C 데이터 경고를 GUI에 항상 표시
+## MK2 GUI
 
-Stage A에서 화면에 보이는 변조 모드는 **프로파일 구간 선택 결과**입니다.
-실제 switching waveform 생성은 Stage B/C에서 구현합니다.
+- `DIRECT CONTROL FREQ`: 0.0–106.8 Hz, slider와 0.1 Hz spinbox
+- `VIRTUAL SPEED`: 0.0–120.0 km/h를 profile mapper로 변환
+- `POWERING`, `COAST`, `BRAKING` 직접 선택
+- control/carrier/fundamental frequency를 서로 다른 필드로 표시
+- modulation mode, pulse count, normalized amplitude(%) 표시
+- 현재 drive-state transition table과 active region highlight
+- U reference/U switching waveform과 switching-excitation FFT
+- `START AUDIO`, `STOP AUDIO`, 0–100% master volume
+- 실행 중 `Reload Profile`
 
-## 프로파일 구조
+Direct mode에서는 정확한 연구 threshold를 위해 hysteresis가 꺼집니다. Virtual
+Speed mode에서는 profile의 `transition_hysteresis_hz`를 사용하여 경계 chatter를
+줄입니다.
 
-필수 최상위 필드는 `name`, `verified`, `description`, `data_notice`,
-`motor_frequency_model`, `powering`입니다. `powering` 구간은 0 km/h부터
-끊김 없이 이어져야 하며 마지막 끝점만 포함 구간으로 처리합니다.
+## MCK01C research profile
 
-- `ASYNC_PWM`: 양수 `carrier_hz` 필요
-- `SYNC_PULSE`: 양의 정수 `pulse_count` 필요
-- `ONE_PULSE`: `pulse_count`가 반드시 1
+POWERING:
 
-현재 motor model은 아래의 명시적인 placeholder 선형식입니다.
+| Control frequency | Pattern |
+|---|---|
+| 0.0–8.5 Hz | ASYNC PWM, carrier 365 Hz |
+| 8.5–16.0 Hz | 27P |
+| 16.0–30.0 Hz | 15P |
+| 30.0–48.0 Hz | 9P |
+| 48.0–60.0 Hz | 5P |
+| 60.0–73.0 Hz | 3P |
+| 73.0–106.8 Hz | 1P |
+
+BRAKING은 별도 table을 사용하며 transition은 16, 30, 50, 74, 100 Hz입니다.
+모든 region은 마지막 끝점을 제외한 half-open interval이고 최종 106.8 Hz만
+포함합니다. 106.8 Hz보다 큰 입력은 clamp됩니다.
+
+Amplitude curve는 `LINEAR`, `STEP`, `HOLD` keyframe을 읽습니다. POWERING의
+48.5 Hz step(0.516 → 0.659)과 BRAKING의 7.5 Hz 저속 cutoff(0 → 0.063)를
+평균내지 않고 표현합니다.
+
+COAST 진입 시 현재 control frequency를 hold하고 3P로 전환합니다. amplitude
+envelope는 82.7%, 60.4%, 44.4%, 28.0%, 0% 관찰 순서를 사용하지만, 각 점의
+시간은 검증되지 않았으므로 전체 decay 시간은 profile tuning parameter입니다.
+
+## Profile schema
+
+MK2 profile은 `schema_version: 2`이며 다음 normalized sections를 사용합니다.
 
 ```text
-electrical_frequency_hz = vehicle_speed_kmh × electrical_hz_per_kmh
+metadata
+input_mapping
+limits
+transition_hysteresis_hz
+powering.regions / powering.amplitude
+braking.regions / braking.amplitude
+coast
+motor_acoustics
 ```
 
-향후 차륜 직경, 기어비, 모터 극수를 반영하는 모델로 `vvvf/motor_model.py`를
-교체할 수 있으며 UI에는 계산식이 들어 있지 않습니다.
+Loader는 기존 schema version 1 JSON도 control-frequency 내부 모델로 변환합니다.
+버전이 없는 MK1 파일은 v1으로 처리하며, 알 수 없는 future schema는 명확한
+`Unsupported profile schema_version` 오류로 거부합니다.
+
+Canonical one-pulse 표현은 v2에서 `mode: SYNC_PULSE`, `pulse_count: 1`입니다.
+v1 loader는 하위 호환성을 위해 기존 `ONE_PULSE` 문자열도 보존합니다.
+
+## 구현 구조
+
+- `vvvf/frequency.py`: input mapper와 finite clamp
+- `vvvf/profile.py`: v1/v2 validation 및 normalized data model
+- `vvvf/state.py`: input/drive/coast/hysteresis state
+- `vvvf/modulation.py`: vectorized 3상 ASYNC/SYNC/1P switching
+- `vvvf/audio.py`: resonance filter, limiter, smoothing, sounddevice lifecycle
+- `ui/main_window.py`: Qt controls, transition view, plots, profile reload
+
+Audio는 48 kHz/512-sample block으로 생성합니다. limiter, 낮은 기본 master volume,
+block-edge smoothing을 적용하고 STOP/창 종료 시 stream을 닫습니다.
 
 ## 테스트
 
@@ -77,17 +140,24 @@ electrical_frequency_hz = vehicle_speed_kmh × electrical_hz_per_kmh
 python -m unittest discover -s tests -v
 ```
 
-프로파일 JSON loading/오류 처리, 19.9→20.1 km/h를 포함한 경계 선택,
-상태 모델의 주파수·변조율·COAST 처리를 검증합니다.
+자동 테스트 범위:
 
-## 다음 단계와 알려진 제한
+- v1/v2 profile loading, invalid/future schema, contiguous regions
+- POWERING/BRAKING transition과 half-open equality
+- direct input bypass, virtual speed mapper, direct-mode hysteresis off
+- amplitude keyframe, linear interpolation, discontinuity, braking cutoff, clamp
+- 3상 120도 offset, ASYNC 365 Hz, 27P/15P/3P/1P switching 차이
+- COAST frequency hold, 3P, envelope decay
+- audio finite output, limiter/volume, stream start/stop cleanup
+- GUI startup, input modes, drive states, active transition, waveform와 FFT data
 
-- Stage B: 3상 기준파와 실제 ASYNC PWM, waveform graph
-- Stage C: 실제 switching 차이를 만드는 SYNC pulse와 ONE_PULSE
-- Stage D: motor acoustic model, limiter/volume/ramp를 포함한 48 kHz audio
-- Stage E: FFT spectrum과 profile reload
-- Stage F: 전체 정리와 최종 검증
+## 알려진 제한
 
-현재는 audio stream, START/STOP, waveform, FFT, profile reload가 없습니다.
-CAN Bus, OBD-II, 실제 gate driver나 인버터/차량 제어 및 고전압 hardware
-output은 이 프로젝트의 MK1 범위 밖입니다.
+- 실제 MCK01C 제조사 control table이나 차량 dynamics가 아닙니다.
+- motor acoustic model은 간단한 configurable resonance filter입니다.
+- 실제 speaker에서의 음색·click/pop·device 호환성은 자동 테스트만으로 승인할 수
+  없으며 직접 청취 검증이 필요합니다.
+- spectrogram은 아직 없습니다.
+- VvvfGeeks YAML importer는 optional 후속 작업이며 이번 core MK2에는 없습니다.
+- CAN, OBD-II, Bluetooth, serial, ESP32/STM32, gate driver, MOSFET/IGBT,
+  고전압 inverter 및 실제 차량 제어는 구현하지 않습니다.

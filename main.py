@@ -1,4 +1,4 @@
-"""Application entry point for VVVF GTO Simulator MK1."""
+"""Application entry point for VVVF GTO Simulator MK2."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="VVVF GTO Simulator MK1")
+    parser = argparse.ArgumentParser(description="VVVF GTO Simulator MK2")
     parser.add_argument(
         "--profile",
         type=Path,
@@ -35,7 +35,7 @@ def main() -> int:
     from vvvf.profile import ProfileError, load_profile
 
     app = QApplication(sys.argv)
-    app.setApplicationName("VVVF GTO Simulator MK1")
+    app.setApplicationName("VVVF GTO Simulator MK2")
 
     try:
         profile = load_profile(args.profile)

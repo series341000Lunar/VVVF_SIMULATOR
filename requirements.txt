@@ -1,7 +1,7 @@
-# Stage A runtime
+# MK2 GUI runtime
 PySide6>=6.8,<6.9
 
-# Reserved for the Stage B-E DSP, audio, and visualization work
+# DSP, audio, and visualization
 numpy>=1.26,<3
 scipy>=1.12,<2
 sounddevice>=0.4.7,<1

@@ -1,0 +1,36 @@
+state,control_frequency_hz,mode,pulse_count,carrier_frequency_hz,amplitude,note,confidence
+POWERING,0.0,ASYNC_PWM,,365,0.000,Observed starting region and amplitude sample,MEDIUM
+POWERING,8.5,SYNC_PULSE,27,,,Observed transition from ASYNC to 27P,MEDIUM
+POWERING,16.0,SYNC_PULSE,15,,,Observed transition from 27P to 15P,MEDIUM
+POWERING,22.7,SYNC_PULSE,15,,0.243,Approximate amplitude sample,APPROXIMATE
+POWERING,30.0,SYNC_PULSE,9,,,Observed transition from 15P to 9P,MEDIUM
+POWERING,37.9,SYNC_PULSE,9,,0.406,Approximate amplitude sample,APPROXIMATE
+POWERING,47.7,SYNC_PULSE,9,,0.513,Approximate pre-step amplitude sample,APPROXIMATE
+POWERING,48.0,SYNC_PULSE,5,,,Observed transition from 9P to 5P,MEDIUM
+POWERING,48.1,SYNC_PULSE,5,,0.516,Approximate pre-step amplitude sample,APPROXIMATE
+POWERING,48.5,SYNC_PULSE,5,,0.659,Approximate discontinuous amplitude step,APPROXIMATE
+POWERING,60.0,SYNC_PULSE,3,,,Observed transition from 5P to 3P,MEDIUM
+POWERING,73.0,SYNC_PULSE,1,,,Observed transition from 3P to 1P,MEDIUM
+POWERING,73.3,SYNC_PULSE,1,,1.000,Approximate full-amplitude sample,APPROXIMATE
+POWERING,106.8,SYNC_PULSE,1,,1.000,Observed upper control frequency,MEDIUM
+BRAKING,0.0,SYNC_PULSE,27,,0.000,Observed starting pattern and zero amplitude,MEDIUM
+BRAKING,7.3,SYNC_PULSE,27,,0.000,Observed low-frequency cutoff below output onset,APPROXIMATE
+BRAKING,7.5,SYNC_PULSE,27,,0.063,Approximate output onset,APPROXIMATE
+BRAKING,7.9,SYNC_PULSE,27,,0.064,Approximate amplitude sample,APPROXIMATE
+BRAKING,8.1,SYNC_PULSE,27,,0.067,Approximate amplitude sample,APPROXIMATE
+BRAKING,8.4,SYNC_PULSE,27,,0.069,Approximate amplitude sample,APPROXIMATE
+BRAKING,15.7,SYNC_PULSE,27,,0.127,Approximate amplitude sample,APPROXIMATE
+BRAKING,16.0,SYNC_PULSE,15,,,Observed transition from 27P to 15P,MEDIUM
+BRAKING,29.5,SYNC_PULSE,15,,0.235,Approximate amplitude sample,APPROXIMATE
+BRAKING,30.0,SYNC_PULSE,9,,,Observed transition from 15P to 9P,MEDIUM
+BRAKING,49.3,SYNC_PULSE,9,,0.390,Approximate amplitude sample,APPROXIMATE
+BRAKING,50.0,SYNC_PULSE,5,,,Observed transition from 9P to 5P,MEDIUM
+BRAKING,50.7,SYNC_PULSE,5,,0.503,Approximate amplitude sample,APPROXIMATE
+BRAKING,74.0,SYNC_PULSE,3,,,Observed transition from 5P to 3P,MEDIUM
+BRAKING,100.0,SYNC_PULSE,1,,,Observed transition from 3P to 1P,MEDIUM
+BRAKING,106.8,SYNC_PULSE,1,,1.000,Approximate upper amplitude sample,APPROXIMATE
+COAST,106.8,SYNC_PULSE,3,,0.827,Observed held-frequency decay sequence point; timing unknown,APPROXIMATE
+COAST,106.8,SYNC_PULSE,3,,0.604,Observed held-frequency decay sequence point; timing unknown,APPROXIMATE
+COAST,106.8,SYNC_PULSE,3,,0.444,Observed held-frequency decay sequence point; timing unknown,APPROXIMATE
+COAST,106.8,SYNC_PULSE,3,,0.280,Observed held-frequency decay sequence point; timing unknown,APPROXIMATE
+COAST,106.8,SYNC_PULSE,3,,0.000,Observed end of decay sequence; timing unknown,APPROXIMATE
