@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="VVVF GTO Simulator MK3 — Stage A")
+    parser = argparse.ArgumentParser(description="VVVF GTO Simulator MK3 — Stage B")
     parser.add_argument(
         "--profile",
         type=Path,

@@ -39,5 +39,13 @@ The following settings are not measurements from the observed source:
 - `coast_decay_seconds = 4.0`
 - coast envelope timing positions between the observed amplitude sequence
 - motor acoustic resonance frequencies, gains, and Q values
+- motor electrical-current proxy time constant (`1.5 ms`)
+- motor flux proxy time constant (`3.0 ms`)
+- virtual stator probe count, angular positions, and asymmetric weights
+- force high-pass cutoff (`20 Hz`)
+- force/leakage mix (`97% / 3%`) and motor output gain
+- audio-model crossfade duration (`50 ms`)
 
-They are explicitly labelled `SIMULATOR TUNING` in the profile and UI.
+They are explicitly labelled `SIMULATOR TUNING — NOT VERIFIED MOTOR DATA` in
+the profile and must not be presented as measured MCK01C motor parameters,
+manufacturer data, or a validated electromagnetic motor model.

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from vvvf.audio import AudioOutput, AudioSynthesizer
-from vvvf.model import DriveState, InputMode
+from vvvf.model import AudioModel, DriveState, InputMode
 from vvvf.profile import load_profile
 from vvvf.state import SimulationSnapshot, SimulationState
 
@@ -62,10 +62,15 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(synthesizer.master_volume, 0.0)
 
     def _stable_audio(
-        self, snapshot: SimulationSnapshot, *, compensation_enabled: bool
+        self,
+        snapshot: SimulationSnapshot,
+        *,
+        compensation_enabled: bool,
+        audio_model: AudioModel = AudioModel.LEGACY_SWITCHING,
     ) -> tuple[np.ndarray, AudioSynthesizer]:
         synthesizer = AudioSynthesizer(self.profile, master_volume=1.0)
         synthesizer.set_loudness_compensation(compensation_enabled)
+        synthesizer.set_audio_model(audio_model)
         for _ in range(10):
             synthesizer.synthesize(snapshot, 4800)
         audio = np.concatenate(
@@ -125,6 +130,7 @@ class AudioTests(unittest.TestCase):
             throttle_percent=100,
         )
         synthesizer = AudioSynthesizer(self.profile, master_volume=1.0)
+        synthesizer.set_audio_model(AudioModel.MOTOR_EMULATOR)
         start = coast_state.set_controls(drive_state=DriveState.COAST)
         start_audio = np.concatenate(
             [synthesizer.synthesize(start, 4800) for _ in range(5)]
@@ -172,9 +178,111 @@ class AudioTests(unittest.TestCase):
         self.assertFalse(output.loudness_compensation_enabled)
         output.set_loudness_compensation(True)
         self.assertTrue(output.loudness_compensation_enabled)
+        output.set_audio_model(AudioModel.LEGACY_SWITCHING)
+        self.assertEqual(output.audio_model, AudioModel.LEGACY_SWITCHING)
+        output.set_audio_model(AudioModel.MOTOR_EMULATOR)
+        self.assertEqual(output.audio_model, AudioModel.MOTOR_EMULATOR)
         self.assertTrue(output.is_running)
         output.stop()
         self.assertTrue(created[0].closed)
+
+    def test_legacy_and_motor_models_are_finite_distinct_and_limited(self) -> None:
+        snapshot = self.state.set_controls(direct_control_frequency_hz=30.0)
+        legacy, _ = self._stable_audio(
+            snapshot,
+            compensation_enabled=True,
+            audio_model=AudioModel.LEGACY_SWITCHING,
+        )
+        motor, _ = self._stable_audio(
+            snapshot,
+            compensation_enabled=True,
+            audio_model=AudioModel.MOTOR_EMULATOR,
+        )
+        self.assertTrue(np.isfinite(legacy).all())
+        self.assertTrue(np.isfinite(motor).all())
+        self.assertGreater(float(np.max(np.abs(motor))), 0.0)
+        self.assertLessEqual(float(np.max(np.abs(motor))), 0.95)
+        self.assertFalse(np.allclose(legacy, motor))
+
+    def test_loudness_calibration_is_separate_for_each_audio_model(self) -> None:
+        synthesizer = AudioSynthesizer(self.profile)
+        legacy = synthesizer._loudness_compensators[AudioModel.LEGACY_SWITCHING]
+        motor = synthesizer._loudness_compensators[AudioModel.MOTOR_EMULATOR]
+        self.assertIsNot(legacy, motor)
+        snapshot = self.state.set_controls(direct_control_frequency_hz=30.0)
+        legacy_gain = legacy.target_gain_db(
+            snapshot.control_frequency_hz,
+            snapshot.mode,
+            snapshot.pulse_count,
+            snapshot.amplitude,
+        )
+        motor_gain = motor.target_gain_db(
+            snapshot.control_frequency_hz,
+            snapshot.mode,
+            snapshot.pulse_count,
+            snapshot.amplitude,
+        )
+        self.assertNotAlmostEqual(legacy_gain, motor_gain)
+
+    def test_motor_loudness_compensation_keeps_range_reasonable(self) -> None:
+        levels_db: list[float] = []
+        for frequency in (10.0, 30.0, 60.0, 106.0):
+            snapshot = self.state.set_controls(
+                direct_control_frequency_hz=frequency,
+                drive_state=DriveState.POWERING,
+            )
+            audio, _ = self._stable_audio(
+                snapshot,
+                compensation_enabled=True,
+                audio_model=AudioModel.MOTOR_EMULATOR,
+            )
+            levels_db.append(
+                20.0 * np.log10(np.sqrt(np.mean(np.square(audio))))
+            )
+        self.assertLess(float(np.ptp(levels_db)), 6.0)
+
+    def test_audio_model_crossfade_does_not_reset_phase_or_pop(self) -> None:
+        snapshot = self.state.set_controls(direct_control_frequency_hz=31.0)
+        synthesizer = AudioSynthesizer(self.profile, master_volume=1.0)
+        synthesizer.set_audio_model(AudioModel.LEGACY_SWITCHING)
+        previous = None
+        for _ in range(10):
+            previous = synthesizer.synthesize(snapshot, 4800)
+        phase_before = synthesizer.modulator._fundamental_phase
+        synthesizer.set_audio_model(AudioModel.MOTOR_EMULATOR)
+        self.assertEqual(synthesizer.modulator._fundamental_phase, phase_before)
+        transitioned = synthesizer.synthesize(snapshot, 4800)
+        self.assertIsNotNone(previous)
+        self.assertAlmostEqual(float(transitioned[0]), float(previous[-1]), places=6)
+        self.assertNotEqual(synthesizer.modulator._fundamental_phase, 0.0)
+
+    def test_motor_braking_cutoff_ringdown_becomes_silent(self) -> None:
+        synthesizer = AudioSynthesizer(self.profile, master_volume=1.0)
+        synthesizer.set_audio_model(AudioModel.MOTOR_EMULATOR)
+        audible = self.state.set_controls(
+            direct_control_frequency_hz=7.5,
+            drive_state=DriveState.BRAKING,
+        )
+        for _ in range(5):
+            synthesizer.synthesize(audible, 4800)
+        cutoff = self.state.set_controls(direct_control_frequency_hz=7.3)
+        tail = None
+        for _ in range(20):
+            tail = synthesizer.synthesize(cutoff, 4800)
+        self.assertIsNotNone(tail)
+        self.assertLess(float(np.sqrt(np.mean(np.square(tail)))), 1e-5)
+
+    def test_motor_emulator_is_stable_for_thirty_synthetic_seconds(self) -> None:
+        snapshot = self.state.set_controls(direct_control_frequency_hz=40.0)
+        synthesizer = AudioSynthesizer(self.profile, master_volume=1.0)
+        synthesizer.set_audio_model(AudioModel.MOTOR_EMULATOR)
+        maximum = 0.0
+        for _ in range(300):
+            audio = synthesizer.synthesize(snapshot, 4800)
+            self.assertTrue(np.isfinite(audio).all())
+            maximum = max(maximum, float(np.max(np.abs(audio))))
+        self.assertGreater(maximum, 0.0)
+        self.assertLessEqual(maximum, 0.95)
 
     def test_stream_start_stop_releases_device(self) -> None:
         created: list[FakeStream] = []

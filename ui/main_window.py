@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from vvvf.audio import AudioOutput
-from vvvf.model import DriveState, InputMode, ModulationMode
+from vvvf.model import AudioModel, DriveState, InputMode, ModulationMode
 from vvvf.modulation import VVVFModulator
 from vvvf.profile import ProfileError, VVVFProfile, load_profile
 from vvvf.state import SimulationSnapshot, SimulationState
@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
             ("pulse", "Pulse Count"),
             ("amplitude", "Amplitude"),
             ("fundamental", "Fundamental Frequency"),
+            ("audio_model", "Audio Model"),
             ("audio", "Audio Output State"),
         )
         for key, label in status_fields:
@@ -201,6 +202,10 @@ class MainWindow(QMainWindow):
 
         audio = QGroupBox("Audio Output")
         audio_layout = QFormLayout(audio)
+        self.audio_model_combo = QComboBox()
+        self.audio_model_combo.addItems([model.value for model in AudioModel])
+        self.audio_model_combo.setCurrentText(self.audio_output.audio_model.value)
+        audio_layout.addRow("Audio Model", self.audio_model_combo)
         volume_row = QHBoxLayout()
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -295,6 +300,7 @@ class MainWindow(QMainWindow):
         self.master_controller_slider.valueChanged.connect(self._master_changed)
         self.drive_state_combo.currentTextChanged.connect(self._controls_changed)
         self.volume_slider.valueChanged.connect(self._volume_changed)
+        self.audio_model_combo.currentTextChanged.connect(self._audio_model_changed)
         self.loudness_checkbox.toggled.connect(self._loudness_changed)
         self.start_audio_button.clicked.connect(self._start_audio)
         self.stop_audio_button.clicked.connect(self._stop_audio)
@@ -367,6 +373,10 @@ class MainWindow(QMainWindow):
         self.volume_value.setText(f"{value:d} %")
         self.audio_output.set_master_volume(value / 100.0)
 
+    def _audio_model_changed(self, audio_model: str) -> None:
+        self.audio_output.set_audio_model(audio_model)
+        self._refresh(self._latest_snapshot)
+
     def _loudness_changed(self, enabled: bool) -> None:
         self.loudness_checkbox.setText("ON" if enabled else "OFF")
         self.audio_output.set_loudness_compensation(enabled)
@@ -435,6 +445,7 @@ class MainWindow(QMainWindow):
             else new_profile.drive_dynamics.data_notice
         )
         self.audio_output.set_master_volume(self.volume_slider.value() / 100.0)
+        self.audio_output.set_audio_model(self.audio_model_combo.currentText())
         self.audio_output.set_loudness_compensation(
             self.loudness_checkbox.isChecked()
         )
@@ -478,6 +489,7 @@ class MainWindow(QMainWindow):
         self.status_labels["fundamental"].setText(
             f"{snapshot.fundamental_frequency_hz:.2f} Hz"
         )
+        self.status_labels["audio_model"].setText(self.audio_output.audio_model.value)
         self.status_labels["audio"].setText(self.audio_output.state)
         self.monitor_gain_value.setText(
             f"{self.audio_output.monitor_gain_db:+.1f} dB"

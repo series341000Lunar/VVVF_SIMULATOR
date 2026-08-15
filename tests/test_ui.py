@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
-from vvvf.model import DriveState, InputMode
+from vvvf.model import AudioModel, DriveState, InputMode
 from vvvf.profile import load_profile
 
 
@@ -117,6 +117,26 @@ class MainWindowTests(unittest.TestCase):
         self.application.processEvents()
         self.assertEqual(self.window.loudness_checkbox.text(), "ON")
         self.assertTrue(self.window.audio_output.loudness_compensation_enabled)
+
+    def test_audio_model_defaults_to_motor_and_can_ab_switch(self) -> None:
+        self.assertEqual(
+            self.window.audio_model_combo.currentText(), AudioModel.MOTOR_EMULATOR.value
+        )
+        self.assertEqual(
+            self.window.status_labels["audio_model"].text(),
+            AudioModel.MOTOR_EMULATOR.value,
+        )
+        self.window.audio_model_combo.setCurrentText(
+            AudioModel.LEGACY_SWITCHING.value
+        )
+        self.application.processEvents()
+        self.assertEqual(
+            self.window.audio_output.audio_model, AudioModel.LEGACY_SWITCHING
+        )
+        self.assertEqual(
+            self.window.status_labels["audio_model"].text(),
+            AudioModel.LEGACY_SWITCHING.value,
+        )
 
     def test_profile_reload_keeps_schema_v2_running(self) -> None:
         self.window.reload_button.click()

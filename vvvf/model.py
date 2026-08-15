@@ -17,6 +17,11 @@ class DriveState(StrEnum):
     BRAKING = "BRAKING"
 
 
+class AudioModel(StrEnum):
+    LEGACY_SWITCHING = "LEGACY SWITCHING"
+    MOTOR_EMULATOR = "MOTOR EMULATOR"
+
+
 class ModulationMode(StrEnum):
     ASYNC_PWM = "ASYNC_PWM"
     SYNC_PULSE = "SYNC_PULSE"

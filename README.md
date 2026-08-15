@@ -1,4 +1,4 @@
-# VVVF GTO Simulator MK3 — Stage A
+# VVVF GTO Simulator MK3 — Stage B
 
 철도용 VVVF 변조 패턴을 PC에서 연구하기 위한 Python 시뮬레이터입니다.
 녹음된 MP3/WAV를 속도에 맞춰 재생하지 않고, 외부 프로파일에 따라 3상 기준파와
@@ -64,7 +64,7 @@ python main.py --profile .\profiles\mck01c_research.json
 처음 실행할 때 audio는 정지 상태이며 master volume은 20%입니다. `START AUDIO`를
 누르기 전에 Windows 출력 장치와 시스템 볼륨을 확인하십시오.
 
-## MK3 Stage A GUI
+## MK3 GUI
 
 - `DIRECT CONTROL FREQ`: 0.0–106.8 Hz, slider와 0.1 Hz spinbox
 - `VIRTUAL SPEED`: 0.0–120.0 km/h를 profile mapper로 변환
@@ -76,6 +76,8 @@ python main.py --profile .\profiles\mck01c_research.json
 - 현재 drive-state transition table과 active region highlight
 - U reference/U switching waveform과 switching-excitation FFT
 - `START AUDIO`, `STOP AUDIO`, 0–100% master volume
+- `LEGACY SWITCHING` / `MOTOR EMULATOR` 실시간 A/B selector
+- Loudness Compensation ON/OFF와 현재 monitor gain 표시
 - 실행 중 `Reload Profile`
 
 Direct mode에서는 정확한 연구 threshold를 위해 hysteresis가 꺼집니다. Virtual
@@ -121,7 +123,7 @@ envelope는 82.7%, 60.4%, 44.4%, 28.0%, 0% 관찰 순서를 사용하지만, 각
 
 ## Profile schema
 
-MK2 profile은 `schema_version: 2`이며 다음 normalized sections를 사용합니다.
+MK3 profile은 `schema_version: 2`이며 다음 normalized sections를 사용합니다.
 
 ```text
 metadata
@@ -142,13 +144,49 @@ Loader는 기존 schema version 1 JSON도 control-frequency 내부 모델로 변
 Canonical one-pulse 표현은 v2에서 `mode: SYNC_PULSE`, `pulse_count: 1`입니다.
 v1 loader는 하위 호환성을 위해 기존 `ONE_PULSE` 문자열도 보존합니다.
 
+## Motor Acoustic Emulator
+
+기본 audio model은 `MOTOR EMULATOR`이며 Legacy Switching을 삭제하지 않고 즉시
+A/B 전환할 수 있습니다. 전환 시 50 ms crossfade를 사용하며 inverter fundamental
+phase와 carrier phase는 reset하지 않습니다.
+
+```text
+3-Phase Switching
+        ↓ common-mode removal
+Normalized Phase Voltage ABC
+        ↓ 1.5 ms stateful response
+Winding Current Proxy
+        ↓ 3.0 ms stateful flux response
+Flux ABC → Clarke-like αβ
+        ↓ 8 asymmetric stator probes, B²
+Radial Force Proxy
+        ↓ 20 Hz high-pass
+650 / 1200 / 2400 Hz Structural Resonance
+        ↓
+97% Motor Force + 3% Switching Leakage
+```
+
+전류·자속·force·resonance 상태는 audio block 사이에서 유지되며 profile reload,
+application restart 또는 명시적인 audio reset에서만 초기화됩니다. 모든 값은
+normalized synthesis parameter이며 실제 Toshiba motor R/L, slot geometry 또는
+SPL 데이터가 아닙니다.
+
+비교 sweep은 다음 명령으로 실행합니다.
+
+```powershell
+python -m tools.motor_audio_sweep
+```
+
+현재 결과는 `research/analysis/motor_emulator_sweep.csv`에 기록되어 있습니다.
+GUI waveform과 Switching Excitation FFT는 계속 inverter source를 표시합니다.
+
 ## Monitor Loudness Compensation
 
 청취용 음량 보정은 VVVF profile amplitude를 변경하지 않고 audio output에만
 적용됩니다.
 
 ```text
-Legacy Acoustic Model
+Selected Acoustic Model
         ↓
 Monitor Loudness Compensation
         ↓
@@ -161,8 +199,8 @@ PWM modulation index는 switching duty/pulse width를 결정합니다. Normalize
 voltage level에는 amplitude를 다시 곱하지 않아 저속 신호의 중복 감쇠를 피합니다.
 Profile amplitude curve와 pulse transition 자체는 그대로 유지됩니다.
 
-Legacy model은 시작 시 1 Hz 간격의 POWERING sweep을 자동 계산하여 주파수·변조
-모드별 예상 RMS calibration map을 캐시합니다. 기본 target은 -20 dBFS, gain 범위는
+Legacy와 Motor model은 각각 독립적인 1 Hz POWERING calibration map을 캐시합니다.
+기본 target은 -20 dBFS, gain 범위는
 -6…+18 dB이며 주파수 curve smoothing과 150 ms attack/500 ms release를 적용합니다.
 이 값들은 모두 `motor_acoustics.monitor_loudness`의 simulator tuning입니다.
 
@@ -186,8 +224,9 @@ python -m tools.audio_rms_sweep
 - `vvvf/profile.py`: v1/v2 validation 및 normalized data model
 - `vvvf/state.py`: input/drive/coast/hysteresis state
 - `vvvf/modulation.py`: vectorized 3상 ASYNC/SYNC/1P switching
+- `vvvf/motor_emulator.py`: phase voltage, current, flux, force, resonance DSP
 - `vvvf/loudness.py`: calibration curve, gain clamp, realtime gain smoothing
-- `vvvf/audio.py`: resonance filter, loudness layer, limiter, sounddevice lifecycle
+- `vvvf/audio.py`: model selection/crossfade, loudness, limiter, stream lifecycle
 - `ui/main_window.py`: Qt controls, transition view, plots, profile reload
 
 Audio는 48 kHz/512-sample block으로 생성합니다. limiter, 낮은 기본 master volume,
@@ -208,6 +247,10 @@ python -m unittest discover -s tests -v
 - Drive Simulation의 Power/Coast/Brake 적분, clamp, finite 입력, profile amplitude
 - amplitude keyframe, linear interpolation, discontinuity, braking cutoff, clamp
 - 3상 120도 offset, ASYNC 365 Hz, 27P/15P/3P/1P switching 차이
+- phase voltage balance, current/flux state continuity, force DC removal
+- 365 Hz tonal energy, 모든 pulse-mode 차이, structural resonance와 force/leakage mix
+- Legacy/Motor distinct output, 50 ms crossfade와 model별 loudness calibration
+- 30초 Motor Emulator finite/bounded stability
 - COAST frequency hold, 3P, envelope decay
 - audio finite/silence, loudness gain clamp, low/high RMS spread, Coast/Brake 보존
 - loudness ON/OFF와 stream start/stop cleanup
@@ -218,12 +261,26 @@ python -m unittest discover -s tests -v
 - 실제 MCK01C 제조사 control table이나 차량 dynamics가 아닙니다.
 - rolling resistance, aerodynamic drag와 실제 열차 질량/가속도는 아직 모델링하지
   않습니다.
-- motor acoustic model은 간단한 configurable resonance filter입니다.
+- Motor Emulator는 normalized physically-inspired proxy이며 실제 induction-motor
+  equivalent circuit, FEM, slot geometry 또는 제조사 motor model이 아닙니다.
 - 실제 speaker에서의 음색·click/pop·device 호환성은 자동 테스트만으로 승인할 수
   없으며 직접 청취 검증이 필요합니다.
 - spectrogram은 아직 없습니다.
-- Motor Acoustic Emulator와 Auto Test/WAV/CSV/Spectrogram workflow는 각각 MK3
-  Stage B/C 범위이며 Stage A에는 아직 포함되지 않았습니다.
+- Auto Test/WAV full-cycle/CSV state logger/Spectrogram은 Stage C 범위이며 아직
+  포함되지 않았습니다.
 - VvvfGeeks YAML importer는 optional 후속 작업이며 이번 MK3에는 없습니다.
 - CAN, OBD-II, Bluetooth, serial, ESP32/STM32, gate driver, MOSFET/IGBT,
   고전압 inverter 및 실제 차량 제어는 구현하지 않습니다.
+
+## 사용자 청취 확인 항목
+
+1. 저속 ASYNC 365 Hz 특징이 유지되는지
+2. 27P 전환이 구분되는지
+3. 15P / 9P / 5P / 3P / 1P가 각각 다르게 들리는지
+4. Legacy보다 raw electronic 느낌이 감소했는지
+5. Motor Emulator가 지나치게 둔탁하지 않은지
+6. 저속 음량이 다시 작아지지 않았는지
+7. 고속에서 harsh clipping이 없는지
+8. Power → Coast → Brake 전환이 자연스러운지
+
+주관적 음색은 자동 테스트로 승인하지 않으며 사용자 청취 검증이 필요합니다.

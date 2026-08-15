@@ -9,15 +9,19 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import signal
 
 from .loudness import (
     LoudnessCalibrationPoint,
     LoudnessCompensationConfig,
     MonitorLoudnessCompensator,
 )
-from .model import ModulationMode
+from .model import AudioModel, ModulationMode
 from .modulation import VVVFModulator
+from .motor_emulator import (
+    MotorAcousticEmulator,
+    MotorEmulatorConfig,
+    StructuralResonanceBank,
+)
 from .profile import VVVFProfile
 from .state import SimulationSnapshot
 
@@ -26,44 +30,19 @@ FloatArray = NDArray[np.float64]
 
 
 class MotorAcousticModel:
-    """Small resonant filter bank; it is not an electromagnetic FEM model."""
+    """Legacy switching excitation plus the shared structural resonance bank."""
 
     def __init__(self, profile: VVVFProfile, sample_rate: int) -> None:
-        self.sample_rate = sample_rate
-        self._filters: list[tuple[FloatArray, FloatArray, FloatArray, float]] = []
-        resonances = profile.motor_acoustics.get("resonances", [])
-        if not isinstance(resonances, list):
-            resonances = []
-        for resonance in resonances:
-            if not isinstance(resonance, dict):
-                continue
-            frequency = float(
-                resonance.get("frequency_hz", resonance.get("frequency", 0.0))
-            )
-            gain = float(resonance.get("gain", 1.0))
-            q = float(resonance.get("q", 4.0))
-            if not all(math.isfinite(value) for value in (frequency, gain, q)):
-                continue
-            if not 20.0 <= frequency < sample_rate / 2.0 or gain < 0 or q <= 0:
-                continue
-            b, a = signal.iirpeak(frequency, q, fs=sample_rate)
-            zi = np.zeros(max(len(a), len(b)) - 1, dtype=np.float64)
-            self._filters.append((b, a, zi, gain))
+        self._resonances = StructuralResonanceBank(
+            profile.motor_acoustics, sample_rate
+        )
+
+    def reset(self) -> None:
+        self._resonances.reset()
 
     def process(self, excitation: FloatArray) -> FloatArray:
         output = 0.12 * excitation
-        if not self._filters:
-            return output
-        resonance_sum = np.zeros_like(excitation)
-        total_gain = 0.0
-        updated: list[tuple[FloatArray, FloatArray, FloatArray, float]] = []
-        for b, a, zi, gain in self._filters:
-            filtered, next_zi = signal.lfilter(b, a, excitation, zi=zi)
-            resonance_sum += gain * filtered
-            total_gain += gain
-            updated.append((b, a, next_zi, gain))
-        self._filters = updated
-        return output + resonance_sum / max(total_gain, 1.0)
+        return output + self._resonances.process(excitation)
 
 
 class AudioSynthesizer:
@@ -78,18 +57,33 @@ class AudioSynthesizer:
         sample_rate: int = 48_000,
         master_volume: float = 0.2,
     ) -> None:
+        self.profile = profile
         self.sample_rate = sample_rate
         self.modulator = VVVFModulator(sample_rate)
         self.acoustics = MotorAcousticModel(profile, sample_rate)
+        self.motor_config = MotorEmulatorConfig.from_mapping(
+            profile.motor_acoustics, sample_rate
+        )
+        self.motor_emulator = MotorAcousticEmulator(self.motor_config, sample_rate)
+        self.motor_emulator.set_structural_resonances(profile.motor_acoustics)
+        self._audio_model = AudioModel(self.motor_config.default_audio_model)
+        self._previous_audio_model = self._audio_model
+        self._crossfade_total_samples = max(
+            int(round(self.motor_config.model_crossfade_ms * sample_rate / 1000.0)),
+            1,
+        )
+        self._crossfade_remaining_samples = 0
         loudness_config = LoudnessCompensationConfig.from_mapping(
             profile.motor_acoustics
         )
-        calibration = self._calibrate_legacy_model(
-            profile, sample_rate, loudness_config
-        )
-        self.loudness_compensator = MonitorLoudnessCompensator(
-            loudness_config, calibration, sample_rate
-        )
+        self._loudness_compensators: dict[AudioModel, MonitorLoudnessCompensator] = {}
+        for audio_model in AudioModel:
+            calibration = self._calibrate_audio_model(
+                profile, sample_rate, loudness_config, audio_model
+            )
+            self._loudness_compensators[audio_model] = MonitorLoudnessCompensator(
+                loudness_config, calibration, sample_rate
+            )
         self._master_volume = 0.2
         self._last_sample = 0.0
         self.set_master_volume(master_volume)
@@ -106,15 +100,25 @@ class AudioSynthesizer:
     def monitor_gain_db(self) -> float:
         return self.loudness_compensator.current_gain_db
 
+    @property
+    def loudness_compensator(self) -> MonitorLoudnessCompensator:
+        """Compatibility access to the currently selected model's compensator."""
+        return self._loudness_compensators[self._audio_model]
+
+    @property
+    def audio_model(self) -> AudioModel:
+        return self._audio_model
+
     @classmethod
-    def _calibrate_legacy_model(
+    def _calibrate_audio_model(
         cls,
         profile: VVVFProfile,
         sample_rate: int,
         config: LoudnessCompensationConfig,
+        audio_model: AudioModel,
     ) -> tuple[LoudnessCalibrationPoint, ...]:
         cache_key = (
-            "LEGACY_SWITCHING",
+            audio_model.value,
             sample_rate,
             profile.minimum_control_frequency_hz,
             profile.maximum_control_frequency_hz,
@@ -150,7 +154,12 @@ class AudioSynthesizer:
                 expected_rms = 0.0
             else:
                 modulator = VVVFModulator(sample_rate)
-                acoustics = MotorAcousticModel(profile, sample_rate)
+                legacy_acoustics = MotorAcousticModel(profile, sample_rate)
+                motor_config = MotorEmulatorConfig.from_mapping(
+                    profile.motor_acoustics, sample_rate
+                )
+                motor_emulator = MotorAcousticEmulator(motor_config, sample_rate)
+                motor_emulator.set_structural_resonances(profile.motor_acoustics)
                 warmup = modulator.generate(
                     warmup_samples,
                     control_frequency_hz=float(frequency),
@@ -159,7 +168,12 @@ class AudioSynthesizer:
                     pulse_count=region.pulse_count,
                     amplitude=amplitude,
                 )
-                acoustics.process(warmup.excitation)
+                if audio_model is AudioModel.LEGACY_SWITCHING:
+                    legacy_acoustics.process(warmup.excitation)
+                else:
+                    motor_emulator.process(
+                        warmup.phase_voltage_abc, warmup.excitation
+                    )
                 measured = modulator.generate(
                     measure_samples,
                     control_frequency_hz=float(frequency),
@@ -168,7 +182,12 @@ class AudioSynthesizer:
                     pulse_count=region.pulse_count,
                     amplitude=amplitude,
                 )
-                raw_audio = acoustics.process(measured.excitation)
+                if audio_model is AudioModel.LEGACY_SWITCHING:
+                    raw_audio = legacy_acoustics.process(measured.excitation)
+                else:
+                    raw_audio = motor_emulator.process(
+                        measured.phase_voltage_abc, measured.excitation
+                    ).acoustic_output
                 limiter_preview = np.tanh(raw_audio * 1.6)
                 expected_rms = float(
                     np.sqrt(np.mean(np.square(limiter_preview, dtype=np.float64)))
@@ -192,13 +211,33 @@ class AudioSynthesizer:
         self._master_volume = min(max(converted, 0.0), 1.0)
 
     def set_loudness_compensation(self, enabled: bool) -> None:
-        self.loudness_compensator.set_enabled(enabled)
+        for compensator in self._loudness_compensators.values():
+            compensator.set_enabled(enabled)
+
+    def set_audio_model(self, audio_model: AudioModel | str) -> None:
+        selected = AudioModel(audio_model)
+        if selected is self._audio_model:
+            return
+        self._previous_audio_model = self._audio_model
+        self._audio_model = selected
+        self._crossfade_remaining_samples = self._crossfade_total_samples
+
+    def reset(self) -> None:
+        self.modulator.reset()
+        self.acoustics.reset()
+        self.motor_emulator.reset()
+        for compensator in self._loudness_compensators.values():
+            compensator.reset()
+        self._previous_audio_model = self._audio_model
+        self._crossfade_remaining_samples = 0
+        self._last_sample = 0.0
 
     def synthesize(
         self, snapshot: SimulationSnapshot, num_samples: int
     ) -> NDArray[np.float32]:
         if snapshot.mode == "COAST" or snapshot.amplitude <= 0.0:
-            target = np.zeros(num_samples, dtype=np.float64)
+            legacy_excitation = np.zeros(num_samples, dtype=np.float64)
+            phase_voltage_abc = np.zeros((3, num_samples), dtype=np.float64)
         else:
             block = self.modulator.generate(
                 num_samples,
@@ -208,14 +247,42 @@ class AudioSynthesizer:
                 pulse_count=snapshot.pulse_count,
                 amplitude=snapshot.amplitude,
             )
-            target = self.acoustics.process(block.excitation)
-        target = self.loudness_compensator.process(
-            target,
-            control_frequency_hz=snapshot.control_frequency_hz,
-            mode=snapshot.mode,
-            pulse_count=snapshot.pulse_count,
-            profile_amplitude=snapshot.amplitude,
-        )
+            legacy_excitation = block.excitation
+            phase_voltage_abc = block.phase_voltage_abc
+        raw_by_model = {
+            AudioModel.LEGACY_SWITCHING: self.acoustics.process(legacy_excitation),
+            AudioModel.MOTOR_EMULATOR: self.motor_emulator.process(
+                phase_voltage_abc, legacy_excitation
+            ).acoustic_output,
+        }
+        compensated_by_model = {
+            audio_model: self._loudness_compensators[audio_model].process(
+                raw_audio,
+                control_frequency_hz=snapshot.control_frequency_hz,
+                mode=snapshot.mode,
+                pulse_count=snapshot.pulse_count,
+                profile_amplitude=snapshot.amplitude,
+            )
+            for audio_model, raw_audio in raw_by_model.items()
+        }
+        target = compensated_by_model[self._audio_model]
+        if self._crossfade_remaining_samples > 0:
+            start = (
+                self._crossfade_total_samples - self._crossfade_remaining_samples
+            )
+            progress = np.clip(
+                (start + np.arange(1, num_samples + 1, dtype=np.float64))
+                / self._crossfade_total_samples,
+                0.0,
+                1.0,
+            )
+            previous = compensated_by_model[self._previous_audio_model]
+            target = previous * (1.0 - progress) + target * progress
+            self._crossfade_remaining_samples = max(
+                self._crossfade_remaining_samples - num_samples, 0
+            )
+            if self._crossfade_remaining_samples == 0:
+                self._previous_audio_model = self._audio_model
         limited = np.tanh(target * 1.6) * self._master_volume
         smoothing_samples = min(64, num_samples)
         if smoothing_samples:
@@ -259,6 +326,19 @@ class AudioOutput:
     def set_loudness_compensation(self, enabled: bool) -> None:
         with self._lock:
             self.synthesizer.set_loudness_compensation(enabled)
+
+    def set_audio_model(self, audio_model: AudioModel | str) -> None:
+        with self._lock:
+            self.synthesizer.set_audio_model(audio_model)
+
+    def reset_audio(self) -> None:
+        with self._lock:
+            self.synthesizer.reset()
+
+    @property
+    def audio_model(self) -> AudioModel:
+        with self._lock:
+            return self.synthesizer.audio_model
 
     @property
     def loudness_compensation_enabled(self) -> bool:

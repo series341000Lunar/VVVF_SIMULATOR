@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .model import ModulationMode
+from .motor_emulator import normalized_phase_voltage_abc
 
 
 FloatArray = NDArray[np.float64]
@@ -19,6 +20,7 @@ class WaveformBlock:
     time_seconds: FloatArray
     references: FloatArray
     switching: FloatArray
+    phase_voltage_abc: FloatArray
     line_voltage_uv: FloatArray
     excitation: FloatArray
     effective_switching_frequency_hz: float
@@ -92,6 +94,7 @@ class VVVFModulator:
         # The modulation index already controls switching duty through the PWM
         # references. Bridge voltage levels remain normalized DC-bus states;
         # multiplying them by amplitude again would double-scale low-speed audio.
+        phase_voltage_abc = normalized_phase_voltage_abc(switching)
         line_voltage_uv = 0.5 * (switching[0] - switching[1])
         common_mode = np.mean(switching, axis=0)
         excitation = (
@@ -113,6 +116,7 @@ class VVVFModulator:
             time_seconds,
             references,
             switching,
+            phase_voltage_abc,
             line_voltage_uv,
             excitation,
             switching_frequency,

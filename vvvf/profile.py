@@ -11,6 +11,7 @@ from typing import Any
 from .dynamics import DriveDynamicsConfig
 from .frequency import LinearFrequencyMapper, clamp_finite
 from .model import DriveState, InterpolationType, ModulationMode
+from .motor_emulator import MotorEmulatorConfig
 
 
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
@@ -220,6 +221,17 @@ def _nonempty_string(value: Any, context: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ProfileError(f"{context} must be a non-empty string")
     return value.strip()
+
+
+def _validated_motor_acoustics(raw: dict[str, Any]) -> dict[str, Any]:
+    value = raw.get("motor_acoustics", {})
+    if not isinstance(value, dict):
+        raise ProfileError("profile.motor_acoustics must be an object")
+    try:
+        MotorEmulatorConfig.from_mapping(value)
+    except ValueError as exc:
+        raise ProfileError(str(exc)) from exc
+    return dict(value)
 
 
 def _parse_mode(
@@ -453,7 +465,7 @@ def _load_v1(raw: dict[str, Any], source_path: Path) -> VVVFProfile:
             ((0.0, 0.0), (1.0, 0.0)),
         ),
         drive_dynamics=None,
-        motor_acoustics=dict(raw.get("motor_acoustics", {})),
+        motor_acoustics=_validated_motor_acoustics(raw),
         source_path=source_path,
     )
 
@@ -633,7 +645,7 @@ def _load_v2(raw: dict[str, Any], source_path: Path) -> VVVFProfile:
         patterns=patterns,
         coast=coast,
         drive_dynamics=drive_dynamics,
-        motor_acoustics=dict(raw.get("motor_acoustics", {})),
+        motor_acoustics=_validated_motor_acoustics(raw),
         source_path=source_path,
     )
 

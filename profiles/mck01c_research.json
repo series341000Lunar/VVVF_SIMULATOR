@@ -90,7 +90,24 @@
     ]
   },
   "motor_acoustics": {
-    "data_notice": "SIMULATOR TUNING — NOT VERIFIED MCK01C VEHICLE DATA",
+    "model": "induction_motor_proxy",
+    "default_audio_model": "MOTOR EMULATOR",
+    "data_notice": "SIMULATOR TUNING — NOT VERIFIED MOTOR DATA",
+    "electrical_response": {
+      "time_constant_ms": 1.5
+    },
+    "flux_response": {
+      "time_constant_ms": 3.0
+    },
+    "force_model": {
+      "probe_count": 8,
+      "highpass_hz": 20.0,
+      "probe_weights": [1.00, 0.91, 1.08, 0.95, 1.03, 0.89, 1.06, 0.97]
+    },
+    "motor_force_mix": 0.97,
+    "switching_leakage_mix": 0.03,
+    "output_gain": 60.0,
+    "model_crossfade_ms": 50.0,
     "monitor_loudness": {
       "enabled_default": true,
       "target_rms_dbfs": -20.0,

@@ -99,6 +99,29 @@ class ProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(ProfileError, "Unsupported profile schema_version 99"):
                 load_profile(profile_path)
 
+    def test_invalid_motor_emulator_parameters_are_rejected(self) -> None:
+        cases = (
+            ("electrical_response", "time_constant_ms", -1.0),
+            ("force_model", "probe_count", 2),
+        )
+        for section, key, value in cases:
+            with self.subTest(section=section, key=key):
+                data = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+                data["motor_acoustics"][section][key] = value
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    profile_path = Path(temporary_directory) / "invalid-motor.json"
+                    profile_path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaises(ProfileError):
+                        load_profile(profile_path)
+
+        data = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+        data["motor_acoustics"]["switching_leakage_mix"] = 1.1
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid-mix.json"
+            profile_path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ProfileError):
+                load_profile(profile_path)
+
     def test_mk1_profile_is_normalized_without_speed_based_engine_selection(self) -> None:
         legacy = {
             "name": "Legacy",
