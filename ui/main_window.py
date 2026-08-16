@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import logging
+import threading
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QElapsedTimer, QSignalBlocker, Qt, QTimer
+from PySide6.QtCore import (
+    QElapsedTimer,
+    QObject,
+    QSignalBlocker,
+    QThread,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QCloseEvent, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -19,6 +30,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSlider,
     QSplitter,
@@ -30,7 +42,45 @@ from vvvf.audio import AudioOutput
 from vvvf.model import AudioModel, DriveState, InputMode, ModulationMode
 from vvvf.modulation import VVVFModulator
 from vvvf.profile import ProfileError, VVVFProfile, load_profile
+from vvvf.run_export import ExportedRun, export_full_cycle
+from vvvf.scenario import FullCycleScenario, ScenarioRunner
 from vvvf.state import SimulationSnapshot, SimulationState
+
+
+class FullCycleRenderWorker(QObject):
+    progress = Signal(int, str)
+    completed = Signal(object)
+    aborted = Signal()
+    failed = Signal(str)
+
+    def __init__(self, profile: VVVFProfile, output_root: Path) -> None:
+        super().__init__()
+        self.profile = profile
+        self.output_root = output_root
+        self._abort_event = threading.Event()
+
+    def request_abort(self) -> None:
+        self._abort_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        from vvvf.offline_renderer import RenderAborted
+
+        try:
+            exported = export_full_cycle(
+                self.profile,
+                output_root=self.output_root,
+                progress=lambda ratio, phase: self.progress.emit(
+                    int(round(ratio * 100.0)), phase
+                ),
+                abort_requested=self._abort_event.is_set,
+            )
+        except RenderAborted:
+            self.aborted.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.completed.emit(exported)
 
 
 class MainWindow(QMainWindow):
@@ -47,9 +97,12 @@ class MainWindow(QMainWindow):
         self.audio_output = AudioOutput(profile, lambda: self._latest_snapshot)
         self.status_labels: dict[str, QLabel] = {}
         self._listed_drive_state: str | None = None
+        self._auto_runner: ScenarioRunner | None = None
+        self._render_thread: QThread | None = None
+        self._render_worker: FullCycleRenderWorker | None = None
 
         logging.basicConfig(level=logging.INFO, format="%(message)s")
-        self.setWindowTitle("VVVF GTO Simulator MK3 — Drive Dynamics")
+        self.setWindowTitle("VVVF GTO Simulator MK3 — Phase 1 Stage C")
         self.setMinimumSize(1120, 760)
         self._build_ui()
         self._apply_control_mode()
@@ -233,6 +286,31 @@ class MainWindow(QMainWindow):
         audio_layout.addRow(buttons)
         left_layout.addWidget(audio)
 
+        analysis = QGroupBox("Analysis / Auto Test")
+        analysis_layout = QVBoxLayout(analysis)
+        analysis_buttons = QHBoxLayout()
+        self.run_full_cycle_button = QPushButton("RUN FULL CYCLE")
+        self.render_full_cycle_button = QPushButton("RENDER FULL CYCLE")
+        self.abort_auto_test_button = QPushButton("ABORT")
+        self.abort_auto_test_button.setEnabled(False)
+        analysis_buttons.addWidget(self.run_full_cycle_button)
+        analysis_buttons.addWidget(self.render_full_cycle_button)
+        analysis_buttons.addWidget(self.abort_auto_test_button)
+        analysis_layout.addLayout(analysis_buttons)
+        self.auto_test_progress = QProgressBar()
+        self.auto_test_progress.setRange(0, 100)
+        self.auto_test_progress.setValue(0)
+        analysis_layout.addWidget(self.auto_test_progress)
+        self.auto_test_status = QLabel("IDLE")
+        self.auto_test_output = QLabel("Output: —")
+        self.auto_test_output.setWordWrap(True)
+        self.auto_test_output.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        analysis_layout.addWidget(self.auto_test_status)
+        analysis_layout.addWidget(self.auto_test_output)
+        left_layout.addWidget(analysis)
+
         transition_group = QGroupBox("Profile Transitions (active row highlighted)")
         transition_layout = QVBoxLayout(transition_group)
         self.transition_list = QListWidget()
@@ -305,12 +383,20 @@ class MainWindow(QMainWindow):
         self.start_audio_button.clicked.connect(self._start_audio)
         self.stop_audio_button.clicked.connect(self._stop_audio)
         self.reload_button.clicked.connect(self._reload_profile)
+        self.run_full_cycle_button.clicked.connect(self._start_interactive_auto_run)
+        self.render_full_cycle_button.clicked.connect(self._start_offline_render)
+        self.abort_auto_test_button.clicked.connect(self._abort_auto_test)
 
     def _input_mode_changed(self, *_args: object) -> None:
         self._apply_control_mode()
         self._controls_changed()
 
     def _apply_control_mode(self) -> None:
+        if self._auto_runner is not None:
+            for control in self._manual_authority_controls():
+                control.setEnabled(False)
+            return
+        self.input_mode_combo.setEnabled(True)
         direct = (
             self.input_mode_combo.currentText()
             == InputMode.DIRECT_CONTROL_FREQUENCY.value
@@ -328,6 +414,120 @@ class MainWindow(QMainWindow):
         self.throttle_slider.setEnabled(not drive_simulation)
         self.master_controller_slider.setEnabled(drive_simulation)
         self.drive_state_combo.setEnabled(not drive_simulation)
+
+    def _manual_authority_controls(self) -> tuple[QWidget, ...]:
+        return (
+            self.input_mode_combo,
+            self.direct_frequency_slider,
+            self.direct_frequency_spin,
+            self.speed_slider,
+            self.throttle_slider,
+            self.master_controller_slider,
+            self.drive_state_combo,
+        )
+
+    def _set_analysis_active(self, active: bool) -> None:
+        self.run_full_cycle_button.setEnabled(not active)
+        self.render_full_cycle_button.setEnabled(not active)
+        self.abort_auto_test_button.setEnabled(active)
+        self.reload_button.setEnabled(not active)
+        if self._auto_runner is not None:
+            for control in self._manual_authority_controls():
+                control.setEnabled(False)
+        elif not active:
+            self._apply_control_mode()
+
+    def _start_interactive_auto_run(self) -> None:
+        if self._auto_runner is not None or self._render_thread is not None:
+            return
+        try:
+            scenario = FullCycleScenario.from_profile(self.profile)
+            self._auto_runner = ScenarioRunner(self.profile, scenario)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Auto Test unavailable", str(exc))
+            return
+        self.simulation = self._auto_runner.state
+        with QSignalBlocker(self.input_mode_combo):
+            self.input_mode_combo.setCurrentText(InputMode.DRIVE_SIMULATION.value)
+        self.auto_test_progress.setValue(0)
+        self.auto_test_status.setText(self._auto_runner.phase.value)
+        self.auto_test_output.setText("Output: interactive preview only")
+        self._set_analysis_active(True)
+        self._latest_snapshot = self._auto_runner.snapshot()
+        self._refresh(self._latest_snapshot)
+        self._elapsed.restart()
+
+    def _finish_interactive_auto_run(self) -> None:
+        self._auto_runner = None
+        self.auto_test_progress.setValue(100)
+        self.auto_test_status.setText("COMPLETE")
+        self._set_analysis_active(False)
+
+    def _start_offline_render(self) -> None:
+        if self._auto_runner is not None or self._render_thread is not None:
+            return
+        output_root = Path(__file__).parents[1] / "research" / "runs"
+        thread = QThread(self)
+        worker = FullCycleRenderWorker(self.profile, output_root)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._offline_render_progress)
+        worker.completed.connect(self._offline_render_complete)
+        worker.aborted.connect(self._offline_render_aborted)
+        worker.failed.connect(self._offline_render_failed)
+        worker.completed.connect(thread.quit)
+        worker.aborted.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._offline_thread_finished)
+        self._render_thread = thread
+        self._render_worker = worker
+        self.auto_test_progress.setValue(0)
+        self.auto_test_status.setText("EXPORTING")
+        self.auto_test_output.setText("Output: preparing run directory…")
+        self._set_analysis_active(True)
+        thread.start()
+
+    @Slot(int, str)
+    def _offline_render_progress(self, percent: int, phase: str) -> None:
+        self.auto_test_progress.setValue(percent)
+        self.auto_test_status.setText(f"EXPORTING · {phase}")
+
+    @Slot(object)
+    def _offline_render_complete(self, exported: ExportedRun) -> None:
+        self.auto_test_progress.setValue(100)
+        self.auto_test_status.setText("COMPLETE")
+        self.auto_test_output.setText(f"Output: {exported.run_directory}")
+
+    @Slot()
+    def _offline_render_aborted(self) -> None:
+        self.auto_test_status.setText("ABORTED")
+        self.auto_test_output.setText("Output: partial run removed")
+
+    @Slot(str)
+    def _offline_render_failed(self, message: str) -> None:
+        self.auto_test_status.setText("ERROR")
+        self.auto_test_output.setText(f"Output: {message}")
+
+    @Slot()
+    def _offline_thread_finished(self) -> None:
+        thread = self._render_thread
+        self._render_worker = None
+        self._render_thread = None
+        self._set_analysis_active(False)
+        if thread is not None:
+            thread.deleteLater()
+
+    def _abort_auto_test(self) -> None:
+        if self._auto_runner is not None:
+            self._auto_runner = None
+            self.auto_test_status.setText("ABORTED")
+            self.auto_test_output.setText("Output: interactive run stopped")
+            self._set_analysis_active(False)
+            return
+        if self._render_worker is not None:
+            self.auto_test_status.setText("ABORTING")
+            self._render_worker.request_abort()
 
     def _direct_slider_changed(self, value: int) -> None:
         with QSignalBlocker(self.direct_frequency_spin):
@@ -396,6 +596,8 @@ class MainWindow(QMainWindow):
         self._refresh(self._latest_snapshot)
 
     def _reload_profile(self) -> None:
+        if self._auto_runner is not None or self._render_thread is not None:
+            return
         try:
             new_profile = load_profile(self.profile.source_path)
         except (OSError, ProfileError) as exc:
@@ -455,9 +657,25 @@ class MainWindow(QMainWindow):
 
     def _tick(self) -> None:
         elapsed_seconds = max(self._elapsed.restart(), 0) / 1000.0
-        snapshot = self.simulation.advance_time(elapsed_seconds)
+        if self._auto_runner is not None:
+            snapshot = self._auto_runner.advance(elapsed_seconds)
+            progress = int(
+                round(
+                    100.0
+                    * self._auto_runner.elapsed_seconds
+                    / self._auto_runner.scenario.total_duration_s
+                )
+            )
+            self.auto_test_progress.setValue(min(progress, 100))
+            self.auto_test_status.setText(self._auto_runner.phase.value)
+            complete = self._auto_runner.complete
+        else:
+            snapshot = self.simulation.advance_time(elapsed_seconds)
+            complete = False
         self._latest_snapshot = snapshot
         self._refresh(snapshot)
+        if complete:
+            self._finish_interactive_auto_run()
 
     def _refresh(self, snapshot: SimulationSnapshot) -> None:
         self.speed_value.setText(f"{snapshot.vehicle_speed_kmh:.1f} km/h")
@@ -470,6 +688,10 @@ class MainWindow(QMainWindow):
             with QSignalBlocker(self.speed_slider):
                 self.speed_slider.setValue(
                     int(round(snapshot.vehicle_speed_kmh * 10.0))
+                )
+            with QSignalBlocker(self.master_controller_slider):
+                self.master_controller_slider.setValue(
+                    int(round(snapshot.master_command))
                 )
         self.status_labels["input"].setText(snapshot.input_mode)
         self.status_labels["speed"].setText(f"{snapshot.vehicle_speed_kmh:.1f} km/h")
@@ -558,5 +780,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
         self._timer.stop()
+        if self._render_worker is not None:
+            self._render_worker.request_abort()
+        if self._render_thread is not None:
+            self._render_thread.quit()
+            self._render_thread.wait(5000)
         self.audio_output.stop()
         super().closeEvent(event)

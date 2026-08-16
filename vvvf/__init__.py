@@ -8,7 +8,11 @@ from .model import AudioModel, DriveState, InputMode, InterpolationType, Modulat
 from .modulation import VVVFModulator, WaveformBlock
 from .motor_emulator import MotorAcousticEmulator, MotorEmulatorConfig
 from .motor_model import LinearMotorFrequencyModel
+from .offline_renderer import OfflineRenderConfig, OfflineRenderer
 from .profile import VVVFProfile, load_profile
+from .run_export import ExportedRun, ValidationSummary, export_full_cycle
+from .scenario import FullCycleScenario, ScenarioPhase, ScenarioRunner
+from .spectrogram import generate_spectrogram
 from .state import SimulationSnapshot, SimulationState
 
 __all__ = [
@@ -27,9 +31,18 @@ __all__ = [
     "MonitorLoudnessCompensator",
     "MotorAcousticEmulator",
     "MotorEmulatorConfig",
+    "OfflineRenderConfig",
+    "OfflineRenderer",
+    "FullCycleScenario",
+    "ScenarioPhase",
+    "ScenarioRunner",
+    "generate_spectrogram",
     "SimulationSnapshot",
     "SimulationState",
     "VVVFProfile",
+    "ExportedRun",
+    "ValidationSummary",
+    "export_full_cycle",
     "VVVFModulator",
     "WaveformBlock",
     "load_profile",

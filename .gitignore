@@ -6,4 +6,5 @@ __pycache__/
 .vscode/
 research/raw/*
 !research/raw/.gitkeep
+research/runs/
 *.mp4

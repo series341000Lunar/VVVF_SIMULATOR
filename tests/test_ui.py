@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
@@ -143,6 +146,47 @@ class MainWindowTests(unittest.TestCase):
         self.application.processEvents()
         self.assertIn("schema v2", self.window.profile_label.text())
         self.assertEqual(self.window.profile.schema_version, 2)
+
+    def test_interactive_auto_run_owns_controls_and_abort_restores_them(self) -> None:
+        self.window.run_full_cycle_button.click()
+        self.application.processEvents()
+        self.assertIsNotNone(self.window._auto_runner)
+        self.assertEqual(self.window.auto_test_status.text(), "POWERING")
+        self.assertFalse(self.window.input_mode_combo.isEnabled())
+        self.assertFalse(self.window.direct_frequency_spin.isEnabled())
+        self.assertFalse(self.window.master_controller_slider.isEnabled())
+        self.assertFalse(self.window.reload_button.isEnabled())
+        self.assertTrue(self.window.abort_auto_test_button.isEnabled())
+
+        self.window.abort_auto_test_button.click()
+        self.application.processEvents()
+        self.assertIsNone(self.window._auto_runner)
+        self.assertEqual(self.window.auto_test_status.text(), "ABORTED")
+        self.assertTrue(self.window.input_mode_combo.isEnabled())
+        self.assertTrue(self.window.master_controller_slider.isEnabled())
+        self.assertTrue(self.window.reload_button.isEnabled())
+
+    def test_offline_render_runs_in_worker_and_reports_output(self) -> None:
+        output_path = Path("research/runs/test_full_cycle")
+
+        def fake_export(*_args: object, **kwargs: object) -> SimpleNamespace:
+            kwargs["progress"](1.0, "BRAKING")
+            return SimpleNamespace(run_directory=output_path)
+
+        with patch("ui.main_window.export_full_cycle", side_effect=fake_export):
+            self.window.render_full_cycle_button.click()
+            self.assertIsNotNone(self.window._render_thread)
+            self.assertFalse(self.window.reload_button.isEnabled())
+            for _ in range(200):
+                self.application.processEvents()
+                if self.window._render_thread is None:
+                    break
+                QTest.qWait(5)
+
+        self.assertIsNone(self.window._render_thread)
+        self.assertEqual(self.window.auto_test_status.text(), "COMPLETE")
+        self.assertIn(str(output_path), self.window.auto_test_output.text())
+        self.assertTrue(self.window.reload_button.isEnabled())
 
 
 if __name__ == "__main__":

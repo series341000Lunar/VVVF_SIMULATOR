@@ -1,8 +1,10 @@
-# VVVF GTO Simulator MK3 — Stage B
+# VVVF GTO Simulator MK3 — Phase 1 Stage C
 
 철도용 VVVF 변조 패턴을 PC에서 연구하기 위한 Python 시뮬레이터입니다.
 녹음된 MP3/WAV를 속도에 맞춰 재생하지 않고, 외부 프로파일에 따라 3상 기준파와
 PWM switching을 계산하여 waveform, FFT, 가상 모터음에 반영합니다.
+Stage C는 같은 DSP를 deterministic offline renderer에서도 재사용해 full-cycle
+WAV, state/event CSV, metadata와 spectrogram을 생성합니다.
 
 현재 구조의 핵심은 vehicle speed와 inverter control을 분리하고, 실제 경과 시간을
 사용하는 Drive Simulation 계층을 기존 MK2 코어 위에 추가한 것입니다.
@@ -78,6 +80,9 @@ python main.py --profile .\profiles\mck01c_research.json
 - `START AUDIO`, `STOP AUDIO`, 0–100% master volume
 - `LEGACY SWITCHING` / `MOTOR EMULATOR` 실시간 A/B selector
 - Loudness Compensation ON/OFF와 현재 monitor gain 표시
+- `RUN FULL CYCLE`: 75.2초 실시간 POWERING → COAST → BRAKING preview
+- `RENDER FULL CYCLE`: 별도 worker에서 빠른 deterministic artifact export
+- `ABORT`, progress, phase status와 output directory 표시
 - 실행 중 `Reload Profile`
 
 Direct mode에서는 정확한 연구 threshold를 위해 hysteresis가 꺼집니다. Virtual
@@ -94,6 +99,54 @@ Drive Simulation 중에는 Master Controller가 Drive State의 유일한 권한�
 따라서 Drive State combo와 Command Level은 비활성화되며, profile amplitude를
 Master Controller 크기로 다시 곱하지 않습니다. 기존 Direct/Virtual mode에서는
 두 컨트롤을 계속 수동으로 사용할 수 있습니다.
+
+## Phase 1 Stage C — Analysis workflow
+
+`RUN FULL CYCLE`은 실시간 preview의 authoritative controller가 됩니다. 실행 중에는
+Direct/Virtual/Master/Drive State와 profile reload가 잠기며 `ABORT` 후 복구됩니다.
+`RENDER FULL CYCLE`은 realtime audio device나 GUI timer를 사용하지 않고 별도 worker
+thread와 별도 DSP state로 다음 profile-derived cycle을 렌더합니다.
+
+```text
+POWERING  0.0 → 106.8 Hz   35.6 s  (106.8 / 3.0)
+COAST     106.8 Hz hold      4.0 s  (profile coast duration)
+BRAKING   106.8 → 0.0 Hz    35.6 s  (106.8 / 3.0)
+TOTAL                         75.2 s
+```
+
+Offline simulation은 48 kHz, 480-sample/10 ms 고정 block을 사용합니다. State log는
+정확히 50 Hz이며 같은 profile/scenario/sample rate에서 audio와 state records가
+deterministic하게 재현됩니다. Realtime 경로의 `AudioSynthesizer`, modulator, Motor
+Emulator, loudness compensation, limiter를 그대로 사용하며 sounddevice callback을
+녹음하지 않습니다.
+
+CLI에서도 실행할 수 있습니다.
+
+```powershell
+python -m tools.render_full_cycle
+python -m tools.render_full_cycle --legacy
+```
+
+각 실행은 Git에서 제외되는 다음 Windows-compatible 폴더를 만듭니다.
+
+```text
+research/runs/YYYYMMDD_HHMMSS_mck01c_full_cycle/
+├─ motor.wav          # canonical, 48 kHz mono 16-bit PCM
+├─ legacy.wav         # --legacy에서만 생성
+├─ state.csv          # 50 Hz normalized state log
+├─ events.csv         # phase/pulse transition timestamps
+├─ run_metadata.json  # profile SHA-256, tuning, Git state, validation
+└─ spectrogram.png    # motor.wav 기반 0–6 kHz analysis
+```
+
+Canonical Motor WAV는 Stage B DSP 뒤에 0.8 master scale을 적용하며, validation은
+finite/non-silent/near-silence뿐 아니라 0.95 limiter 경계에 닿은 sample이 0개인지도
+검사합니다.
+
+`state.csv`는 time, scenario phase, master command, drive state, virtual speed,
+control/modulation/carrier/effective-switching frequency, pulse count, profile
+amplitude, monitor gain과 audio model을 기록합니다. Spectrogram은 최종 PCM WAV를
+다시 읽어 만들며 POWERING/COAST/BRAKING 구간과 modulation transition을 표시합니다.
 
 ## MCK01C research profile
 
@@ -227,7 +280,11 @@ python -m tools.audio_rms_sweep
 - `vvvf/motor_emulator.py`: phase voltage, current, flux, force, resonance DSP
 - `vvvf/loudness.py`: calibration curve, gain clamp, realtime gain smoothing
 - `vvvf/audio.py`: model selection/crossfade, loudness, limiter, stream lifecycle
-- `ui/main_window.py`: Qt controls, transition view, plots, profile reload
+- `vvvf/scenario.py`: profile-derived full-cycle definition과 fixed-time runner
+- `vvvf/offline_renderer.py`: device-independent deterministic DSP rendering
+- `vvvf/run_export.py`: WAV/CSV/metadata export와 automatic validation
+- `vvvf/spectrogram.py`: canonical WAV spectrogram과 transition overlays
+- `ui/main_window.py`: Qt controls, plots, worker-thread Auto Test/Export
 
 Audio는 48 kHz/512-sample block으로 생성합니다. limiter, 낮은 기본 master volume,
 block-edge smoothing을 적용하고 STOP/창 종료 시 stream을 닫습니다.
@@ -255,6 +312,10 @@ python -m unittest discover -s tests -v
 - audio finite/silence, loudness gain clamp, low/high RMS spread, Coast/Brake 보존
 - loudness ON/OFF와 stream start/stop cleanup
 - GUI startup, input modes, drive states, active transition, waveform와 FFT data
+- profile-derived 75.2초 scenario와 0 → max → hold → 0 endpoint
+- exact short-render determinism, 48 kHz mono WAV와 50 Hz CSV
+- profile SHA-256/Stage B tuning metadata와 POWERING 7/7, BRAKING 6/6 validation
+- final WAV 기반 non-empty spectrogram PNG와 non-blocking GUI worker/ABORT
 
 ## 알려진 제한
 
@@ -263,11 +324,9 @@ python -m unittest discover -s tests -v
   않습니다.
 - Motor Emulator는 normalized physically-inspired proxy이며 실제 induction-motor
   equivalent circuit, FEM, slot geometry 또는 제조사 motor model이 아닙니다.
-- 실제 speaker에서의 음색·click/pop·device 호환성은 자동 테스트만으로 승인할 수
-  없으며 직접 청취 검증이 필요합니다.
-- spectrogram은 아직 없습니다.
-- Auto Test/WAV full-cycle/CSV state logger/Spectrogram은 Stage C 범위이며 아직
-  포함되지 않았습니다.
+- Realtime rolling spectrogram과 manual-drive recording은 구현하지 않았습니다.
+- spectrogram의 미적 품질과 실제 speaker/device 호환성은 자동 테스트 대상이
+  아닙니다.
 - VvvfGeeks YAML importer는 optional 후속 작업이며 이번 MK3에는 없습니다.
 - CAN, OBD-II, Bluetooth, serial, ESP32/STM32, gate driver, MOSFET/IGBT,
   고전압 inverter 및 실제 차량 제어는 구현하지 않습니다.
@@ -283,4 +342,24 @@ python -m unittest discover -s tests -v
 7. 고속에서 harsh clipping이 없는지
 8. Power → Coast → Brake 전환이 자연스러운지
 
-주관적 음색은 자동 테스트로 승인하지 않으며 사용자 청취 검증이 필요합니다.
+Stage B의 주관적 Motor 음색은 사용자 청취 확인을 통과한 baseline이며, Stage C는
+97% Motor Force / 3% Switching Leakage 및 기존 acoustic/loudness tuning을 변경하지
+않습니다.
+
+## Project status
+
+```text
+PHASE 1
+
+MCK01C Profile           PASS
+Drive Dynamics           PASS
+Audio Compensation       PASS
+Motor Acoustic Emulator  PASS
+Analysis Workflow        PASS
+
+VVVF_SIMULATOR — PHASE 1 COMPLETE
+
+PHASE 2
+
+EV6 Data Logger / OBD    NOT STARTED
+```
